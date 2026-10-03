@@ -1,4 +1,6 @@
-# Ilyra
+<p align="center"><img src="build/icon.png" alt="Ilyra" width="128"></p>
+
+<h1 align="center">Ilyra</h1>
 
 A desktop AI launcher for Windows. Bring your own keys for Claude, ChatGPT, Gemini and Meta, and use them all from one conversation: pick a model per message, or let Ilyra route each message to the one that suits it.
 
