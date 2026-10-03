@@ -52,18 +52,39 @@ PROVIDERS.claude.adapter.step = async ({ system, native, onText }) => {
   const none0 = await handlers.chat(event, 'claude', [{ role: 'user', content: 'hi' }], { requestId: 'r0', chatId: 'c0' });
   assert.ok(/isn't connected yet/.test(none0.error), 'a model with no key says so: ' + none0.error);
   const list = await handlers['providers:list'](event);
-  assert.deepStrictEqual(list.map((p) => p.id).sort(), ['chatgpt', 'claude', 'gemini', 'meta'], 'only the cloud providers are offered');
+  assert.deepStrictEqual(list.map((p) => p.id).sort(), ['chatgpt', 'claude', 'gemini', 'local', 'meta'], 'the cloud providers and local models are offered');
 
   // ---- connect a key (checked by listing models); it is never stored in plain text
   const KEY = 'sk-ant-test-' + 'a1'.repeat(20);
   PROVIDERS.claude.models = async (key) => { if (key !== KEY) throw Object.assign(new Error('invalid x-api-key'), { status: 401 }); return ['claude-test-1']; };
   assert.ok((await handlers['providers:save'](event, 'claude', { key: 'wrong' })).error, 'a rejected key is not saved');
-  const saved = await handlers['providers:save'](event, 'claude', { key: KEY });
+  const saved = await handlers['providers:save'](event, 'claude', { key: KEY, model: 'Add a key to choose a model' });
+  assert.ok(saved.provider.model === 'claude-test-1' && !saved.provider.pinned, 'placeholder text is never saved as the model');
   assert.ok(saved.provider && saved.provider.connected, 'the right key connects');
   for (const f of fs.readdirSync(dataDir)) {
     const full = path.join(dataDir, f);
     if (fs.statSync(full).isFile()) assert.ok(!fs.readFileSync(full, 'utf8').includes(KEY), `the key is not in plain text in ${f}`);
   }
+
+  // ---- a local model server: its address is the key
+  assert.ok(/http/.test((await handlers['providers:save'](event, 'local', { key: 'ftp://x' })).error), 'a bad address is refused');
+  PROVIDERS.local.models = async () => [];
+  assert.ok(/no models yet/.test((await handlers['providers:save'](event, 'local', { key: 'localhost:11434' })).error), 'a server without models says so');
+  PROVIDERS.local.models = async (address) => { assert.strictEqual(address, 'http://localhost:11434'); return ['llama3.2:3b']; };
+  const localSaved = await handlers['providers:save'](event, 'local', { key: 'localhost:11434/' });
+  assert.ok(localSaved.provider.connected && localSaved.provider.local, 'a local server connects');
+  assert.strictEqual(localSaved.provider.hint, 'http://localhost:11434', 'its address is shown');
+  assert.strictEqual(localSaved.provider.model, 'llama3.2:3b', 'its first model is used');
+  const realStep = PROVIDERS.local.adapter.step;
+  let localAsk = null;
+  PROVIDERS.local.adapter.step = async (o) => { localAsk = o; o.onText('Hi.'); return { text: 'Hi.', calls: [], raw: {}, usage: null }; };
+  const localRes = await handlers.chat(event, 'local', [{ role: 'user', content: 'hi' }], { requestId: 'rl', chatId: 'cl', web: true, code: true });
+  assert.ok(!localRes.error && localAsk.key === 'http://localhost:11434', 'a local reply goes to that server');
+  assert.ok(!localAsk.web && !localAsk.code && !/You can search the web/.test(localAsk.system), 'a local model is not told it can search the web or run code');
+  assert.ok(!localAsk.tools.some((t) => t.name === 'save_memory'), 'a local model gets the memory tools only when memory comes up');
+  PROVIDERS.local.adapter.step = realStep;
+  await handlers['providers:remove'](event, 'local');
+  sent.length = 0;
 
   // ---- a plain reply
   const res = await handlers.chat(event, 'claude', [{ role: 'user', content: 'hello there' }], { requestId: 'r1', chatId: 'c1' });

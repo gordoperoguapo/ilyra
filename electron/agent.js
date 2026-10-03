@@ -5,6 +5,17 @@ const tools = require('./tools');
 
 const MAX_STEPS = 12;
 const CLIPBOARD_WORDS = /\b(clipboard|copied|copy|copying|paste|pasted)\b/i;
+const MEMORY_WORDS = /\b(remember|forget|memory|memori[sz]e|keep in mind)\b/i;
+const TASK_WORDS = /\b(remind|reminder|schedule[ds]?|tasks?|every (day|morning|evening|night|week|weekday|month)|daily|weekly|alarm|timer)\b/i;
+const LOCAL_TOOL_WORDS = {
+  save_memory: MEMORY_WORDS,
+  forget_memory: MEMORY_WORDS,
+  schedule_task: TASK_WORDS,
+  list_tasks: TASK_WORDS,
+  cancel_task: TASK_WORDS,
+  make_pdf: /\bpdf\b/i,
+  generate_image: /\b(draw|drawing|image|picture|photo|logo|illustration|icon|paint|sketch|wallpaper)\b/i
+};
 
 // ---------- System prompt ----------
 
@@ -106,7 +117,8 @@ async function runAgent(opts) {
   // Which of Ilyra's tools this request may use. The clipboard tools are only offered when the
   // user's message is about the clipboard; some models otherwise call them on every turn.
   const lastUser = [...(opts.messages || [])].reverse().find((m) => m.role === 'user');
-  const clipboardAsked = CLIPBOARD_WORDS.test((lastUser && lastUser.content) || '');
+  const lastText = (lastUser && lastUser.content) || '';
+  const clipboardAsked = CLIPBOARD_WORDS.test(lastText);
   const gate = {
     generate_image: Boolean(opts.generateImage),
     fetch_page: Boolean(opts.web || opts.fetch),
@@ -119,6 +131,11 @@ async function runAgent(opts) {
     cancel_task: Boolean(opts.scheduler),
     make_pdf: Boolean(opts.makePdf)
   };
+  // Small local models call tools at random, so the ones that do something get offered only
+  // when the message is about them. (Ilyra still learns what the user shares; see profile.js.)
+  if (PROVIDERS[opts.id].local) {
+    for (const [name, words] of Object.entries(LOCAL_TOOL_WORDS)) gate[name] = gate[name] && words.test(lastText);
+  }
   const connectors = useTools && opts.connectors && opts.connectors.defs.length ? opts.connectors : null;
   const defs = useTools ? tools.DEFINITIONS.filter((d) => gate[d.name] !== false).concat(connectors ? connectors.defs : []) : [];
 

@@ -9,13 +9,14 @@ const onChat = (channel) => (fn) => ipcRenderer.on(channel, (_e, payload, rid) =
 contextBridge.exposeInMainWorld('ilyra', {
   desktop: true,
 
-  // AI providers and their keys
+  // AI providers and their keys (or, for local models, the server address)
   providers: invoke('providers:list'),
   saveProvider: invoke('providers:save'),
   removeProvider: invoke('providers:remove'),
   providerModels: invoke('providers:models'),
   setModel: invoke('providers:setModel'),
   openKeyPage: invoke('providers:keyPage'),
+  findLocalServer: invoke('providers:findLocal'),
   usage: { get: invoke('usage:get') },
 
   // Chat

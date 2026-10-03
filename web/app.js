@@ -8,9 +8,10 @@
     claude:  { name: 'Claude',  rgb: [255, 106, 26], blurb: 'Long documents, planning and code' },
     chatgpt: { name: 'ChatGPT', rgb: [255, 214, 140], blurb: 'Writing, ideas and everyday tasks' },
     gemini:  { name: 'Gemini',  rgb: [190, 190, 196], blurb: 'Research and multimodal work' },
-    meta:    { name: 'Meta',    rgb: [82, 148, 255],  blurb: 'Muse models: long context, reasoning and images in' }
+    meta:    { name: 'Meta',    rgb: [82, 148, 255],  blurb: 'Muse models: long context, reasoning and images in' },
+    local:   { name: 'Local',   rgb: [94, 196, 170],  blurb: 'A model on your own computer: private and free' }
   };
-  var PROVIDERS = ['claude', 'chatgpt', 'gemini', 'meta'];
+  var PROVIDERS = ['claude', 'chatgpt', 'gemini', 'meta', 'local'];
 
   var $ = function (id) { return document.getElementById(id); };
   var promptEl = $('prompt');
@@ -375,9 +376,9 @@
   // Each kind of request has a default model; "Who handles what" in Settings can change it.
   var TASKS = [
     { id: 'image', name: 'Image generation', desc: 'Drawing, logos, illustrations and photo edits', options: ['chatgpt', 'gemini'] },
-    { id: 'code', name: 'Code and technical work', desc: 'Programming, debugging, architecture and documents', options: ['claude', 'chatgpt', 'gemini', 'meta'] },
+    { id: 'code', name: 'Code and technical work', desc: 'Programming, debugging, architecture and documents', options: ['claude', 'chatgpt', 'gemini', 'meta', 'local'] },
     { id: 'research', name: 'Research and current events', desc: 'Comparing sources, finding facts and the latest news', options: ['claude', 'chatgpt', 'gemini', 'meta'] },
-    { id: 'general', name: 'Everyday writing and questions', desc: 'Drafting, ideas and general conversation', options: ['claude', 'chatgpt', 'gemini', 'meta'] }
+    { id: 'general', name: 'Everyday writing and questions', desc: 'Drafting, ideas and general conversation', options: ['claude', 'chatgpt', 'gemini', 'meta', 'local'] }
   ];
   var ROUTE_DEFAULTS = { image: 'gemini', code: 'claude', research: 'gemini', general: 'chatgpt' };
   var routing = {};
@@ -916,10 +917,10 @@
     { name: 'model', args: '[auto|claude|chatgpt|gemini|meta]', help: 'Switch which model answers', run: function (arg) {
       var want = arg.toLowerCase();
       if (!want) {
-        addNote('Using ' + (selected === 'auto' ? 'Auto' : MODELS[selected].name) + '. Choose with /model auto, claude, chatgpt, gemini or meta.');
+        addNote('Using ' + (selected === 'auto' ? 'Auto' : MODELS[selected].name) + '. Choose with /model auto, claude, chatgpt, gemini, meta or local.');
         return;
       }
-      if (!MODELS[want]) { addNote('There is no model called "' + arg + '". Try auto, claude, chatgpt, gemini or meta.'); return; }
+      if (!MODELS[want]) { addNote('There is no model called "' + arg + '". Try auto, claude, chatgpt, gemini, meta or local.'); return; }
       if (want !== 'auto' && desktop && !(info[want] && info[want].connected)) { addNote(MODELS[want].name + ' is not connected.'); return; }
       select(want);
       addNote('Now using ' + (want === 'auto' ? 'Auto' : MODELS[want].name) + '.');
@@ -1635,7 +1636,7 @@
       if (task.id === 'image' || task.note) {
         var note = document.createElement('div');
         note.className = 'route-desc';
-        note.textContent = task.note || 'Claude and Meta cannot make images. Whatever model you chat with, the picture itself is made by your choice here.';
+        note.textContent = task.note || 'Claude, Meta and local models cannot make images. Whatever model you chat with, the picture itself is made by your choice here.';
         row.appendChild(note);
       }
       list.appendChild(row);
@@ -2289,7 +2290,8 @@
     sel.textContent = '';
     if (!info[key] || !info[key].connected) {
       var none = document.createElement('option');
-      none.textContent = 'Add a key to choose a model';
+      none.textContent = key === 'local' ? 'Connect to choose a model' : 'Add a key to choose a model';
+      none.value = ''; // so a first save picks the best model instead of pinning this text
       sel.appendChild(none);
       sel.disabled = true;
       return;
@@ -2348,15 +2350,39 @@
     $('statusDot').className = 'status-dot ' + (count ? 'ok' : 'warn');
   }
 
+  // Local models have no key: their row takes the address of the model server instead.
   function renderProviderRow(li, key) {
-    var id = key;
     var p = info[key];
+    var isLocal = key === 'local';
     var state = li.querySelector('.state');
-    state.textContent = p.connected ? 'Connected' + (p.hint ? ' · ••' + p.hint : '') : 'Not connected';
+    var hintText = p.hint ? (isLocal ? ' · ' + p.hint : ' · ••' + p.hint) : '';
+    state.textContent = p.connected ? 'Connected' + hintText : 'Not connected';
     state.classList.toggle('ok', p.connected);
-    li.querySelector('.key').placeholder = p.connected ? 'Replace key (optional)' : 'Paste API key';
-    fillModelSelect(li.querySelector('.model-select'), id, true);
+    li.querySelector('.key').placeholder = isLocal
+      ? (p.connected ? 'Change server address (optional)' : 'Server address, like http://localhost:11434')
+      : (p.connected ? 'Replace key (optional)' : 'Paste API key');
+    fillModelSelect(li.querySelector('.model-select'), key, true);
     li.querySelector('.remove').hidden = !p.connected;
+    var find = li.querySelector('.find');
+    if (find) find.hidden = p.connected;
+  }
+
+  // Fills in the address of a model server already running on this computer.
+  function findLocalServer(li, quiet) {
+    var msg = li.querySelector('.provider-row-msg');
+    if (!quiet) { msg.textContent = 'Looking for a model server on this computer…'; msg.className = 'provider-row-msg'; }
+    return window.ilyra.findLocalServer().then(function (res) {
+      var server = res && res.server;
+      if (!server) {
+        if (!quiet) { msg.textContent = 'No model server is running here. Install Ollama or LM Studio, download a model, then try again.'; msg.className = 'provider-row-msg bad'; }
+        return;
+      }
+      li.querySelector('.key').value = server.address;
+      msg.textContent = server.count
+        ? 'Found ' + server.name + ' with ' + server.count + (server.count === 1 ? ' model' : ' models') + '. Press Save to connect.'
+        : 'Found ' + server.name + ', but it has no models yet. Download one in ' + server.name + ', then press Save.';
+      msg.className = 'provider-row-msg' + (server.count ? ' good' : '');
+    });
   }
 
   function buildProviderRows() {
@@ -2378,6 +2404,19 @@
       li.querySelector('.avatar').textContent = MODELS[key].name.charAt(0);
       var form = li.querySelector('form');
       var msg = li.querySelector('.provider-row-msg');
+      var isLocal = key === 'local';
+      if (isLocal) {
+        var keyField = li.querySelector('.key');
+        keyField.type = 'text';
+        keyField.setAttribute('aria-label', 'Server address');
+        li.querySelector('.get').textContent = 'Get Ollama';
+        var find = document.createElement('button');
+        find.type = 'button';
+        find.className = 'link-btn find';
+        find.textContent = 'Find it';
+        find.addEventListener('click', function () { findLocalServer(li, false); });
+        li.querySelector('.head-links').insertBefore(find, li.querySelector('.get'));
+      }
 
       if (!desktop) {
         form.querySelectorAll('input, select, button').forEach(function (el) { el.disabled = true; });
@@ -2387,7 +2426,7 @@
       li.querySelector('.remove').addEventListener('click', function () {
         window.ilyra.removeProvider(key).then(function (p) {
           info[key] = p;
-          msg.textContent = 'Key removed from this computer.';
+          msg.textContent = isLocal ? 'Disconnected.' : 'Key removed from this computer.';
           msg.className = 'provider-row-msg';
           renderProviderRow(li, key);
           renderStatus();
@@ -2398,7 +2437,7 @@
         var keyInput = li.querySelector('.key');
         var save = li.querySelector('.save');
         save.disabled = true;
-        msg.textContent = 'Verifying…';
+        msg.textContent = isLocal ? 'Connecting…' : 'Verifying…';
         msg.className = 'provider-row-msg';
         window.ilyra.saveProvider(key, { key: keyInput.value, model: li.querySelector('.model-select').value })
           .then(function (res) {
@@ -2420,6 +2459,7 @@
 
       list.appendChild(li);
       renderProviderRow(li, key);
+      if (isLocal && desktop && !info[key].connected) findLocalServer(li, true);
     });
   }
 

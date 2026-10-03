@@ -1,6 +1,7 @@
 // Provider and connector keys, encrypted with the OS keychain (DPAPI on Windows), so the file on
-// disk is useless outside this user account. Each entry also keeps the chosen model and the key's
-// last four characters, so the page can show which key is in use without ever seeing it.
+// disk is useless outside this user account. Each entry also keeps the chosen model and a hint
+// (the key's last four characters, or a local server's address), so the page can show which key
+// is in use without ever seeing it.
 const { app, safeStorage } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -26,13 +27,13 @@ function getModel(id) {
   return (load()[id] || {}).model || null;
 }
 
-function set(id, { key, model, pinned }) {
+function set(id, { key, hint, model, pinned }) {
   const data = load();
   const entry = data[id] || {};
   if (key) {
     if (!safeStorage.isEncryptionAvailable()) throw new Error('Secure storage is not available on this system.');
     entry.key = safeStorage.encryptString(key).toString('base64');
-    entry.hint = key.slice(-4);
+    entry.hint = hint || key.slice(-4);
   }
   if (model !== undefined) entry.model = model || undefined;
   if (pinned !== undefined) entry.pinned = pinned || undefined;

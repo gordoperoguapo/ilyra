@@ -62,7 +62,7 @@ function summary(now = new Date()) {
   return out;
 }
 
-const NAMES = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', meta: 'Meta' };
+const NAMES = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', meta: 'Meta', local: 'Local' };
 const short = (n) => (n < 1000 ? String(n) : n < 10000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : n < 1e6 ? Math.round(n / 1000) + 'k' : (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M');
 
 // Is the user asking about their token usage?

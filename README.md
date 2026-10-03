@@ -2,13 +2,14 @@
 
 <h1 align="center">Ilyra</h1>
 
-A desktop AI launcher for Windows. Bring your own keys for Claude, ChatGPT, Gemini and Meta, and use them all from one conversation: pick a model per message, or let Ilyra route each message to the one that suits it.
+A desktop AI launcher for Windows. Bring your own keys for Claude, ChatGPT, Gemini and Meta, or run a model on your own computer, and use them all from one conversation: pick a model per message, or let Ilyra route each message to the one that suits it.
 
 Keys are pasted into **Settings, AI models**, encrypted with Windows' per-user protection (Electron `safeStorage`) and stored only on that computer. They never reach the page itself, only the main process that calls each provider, and they go to that provider and nowhere else.
 
 ## What Ilyra can do
 
 - **Chat with Claude, ChatGPT, Gemini and Meta.** Replies stream in, with the model's thinking, the steps it took and its sources folded beside them. If a model is retired, overloaded or out of credit, Ilyra tries the next best one.
+- **Local models.** Run [Ollama](https://ollama.com), LM Studio, llama.cpp, Jan or vLLM and Ilyra finds it: open **Settings, AI models**, press Save on the Local row, and pick a model. No key, the conversation goes only to your own server, and it gets the same tools as the cloud models (minus web search and running code, which happen on the providers' side).
 - **Auto routing.** Code, research, images and everyday questions each go to the model you choose under **Settings, Who handles what**, or to a sensible default.
 - **Web search, page reading and code.** Models search the web with their providers' own tools, can open a specific page (never private or local addresses), and run Python in the provider's sandbox.
 - **Images.** Attach or paste a picture, or capture your screen, and ask about it. ChatGPT and Gemini can make and edit images.
@@ -46,6 +47,7 @@ Produces `release/Ilyra Setup <version>.exe` (installer) and `release/Ilyra-<ver
 | `electron/main.js` | The window, tray and every request the page makes; model fallback |
 | `electron/preload.js` | The only bridge between the page and the main process |
 | `electron/providers.js` | Claude, OpenAI, Gemini and Meta through their official SDKs; model ranking; error messages |
+| `electron/local.js` | Local models: finding the server, Ollama's API and OpenAI-compatible ones |
 | `electron/agent.js` | One reply: the system prompt and the tool-calling loop |
 | `electron/tools.js` | The tools models can call: files, chats, memory, clipboard, tasks, images, PDFs, web pages |
 | `electron/mcp.js` | Connectors (remote MCP servers) |

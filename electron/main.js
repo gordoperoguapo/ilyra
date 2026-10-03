@@ -204,30 +204,36 @@ function notify(title, body, chatId) {
 function describe(id) {
   const p = PROVIDERS[id];
   const s = keystore.summary(id);
-  return { id, name: p.name, connected: s.connected, outOfCredit: outOfCredit.has(id), hint: s.hint, model: s.model || p.defaultModel, defaultModel: p.defaultModel, pinned: s.pinned };
+  return { id, name: p.name, local: Boolean(p.local), connected: s.connected, outOfCredit: outOfCredit.has(id), hint: s.hint, model: s.model || p.defaultModel, defaultModel: p.defaultModel, pinned: s.pinned };
 }
 
 ipcMain.handle('providers:list', () => PROVIDER_IDS.map(describe));
 
-// Saving a key also checks it, by listing the provider's models.
+// Saving a key also checks it, by listing the provider's models. For local models the "key" is
+// the server's address.
 ipcMain.handle('providers:save', async (_e, id, fields) => {
   const p = PROVIDERS[id];
   if (!p) return { error: 'Unknown provider.' };
-  const typedKey = String((fields && fields.key) || '').trim();
+  let typedKey = String((fields && fields.key) || '').trim();
+  if (p.local && typedKey) {
+    try { typedKey = p.normalizeAddress(typedKey); } catch (err) { return { error: err.message }; }
+  }
   const key = typedKey || keystore.getKey(id);
-  if (!key) return { error: 'Paste an API key first.' };
+  if (!key) return { error: p.local ? 'Type the address of your model server first.' : 'Paste an API key first.' };
   let models;
   try {
     models = await p.models(key);
   } catch (err) {
     return { error: friendlyError(err) };
   }
+  if (p.local && !models.length) return { error: 'The server is running but has no models yet. Download one first (in Ollama: ollama pull llama3.2), then press Save again.' };
   // No model typed in? Use the best one this key can use. A typed choice is remembered as
   // the user's own (pinned); an automatic pick is not.
-  const typedModel = String((fields && fields.model) || '').trim();
+  const typed = String((fields && fields.model) || '').trim();
+  const typedModel = models.includes(typed) ? typed : '';
   const existing = keystore.summary(id);
   const model = typedModel || (existing.pinned && existing.model) || pickModel(id, models);
-  keystore.set(id, { key: typedKey || null, model, pinned: typedModel ? true : undefined });
+  keystore.set(id, { key: typedKey || null, hint: p.local ? typedKey : undefined, model, pinned: typedModel ? true : undefined });
   outOfCredit.delete(id);
   return { provider: describe(id), models };
 });
@@ -258,6 +264,11 @@ ipcMain.handle('providers:remove', (_e, id) => {
   if (!PROVIDERS[id]) return { error: 'Unknown provider.' };
   keystore.remove(id);
   return describe(id);
+});
+
+// Looks for a model server already running on this computer, to fill in its address.
+ipcMain.handle('providers:findLocal', async () => {
+  try { return { server: await PROVIDERS.local.find() }; } catch (err) { return fail(err); }
 });
 
 ipcMain.handle('providers:keyPage', (_e, id) => {
@@ -370,7 +381,7 @@ async function connectorTools() {
 ipcMain.handle('chat', async (e, id, messages, options = {}) => {
   const p = PROVIDERS[id];
   const key = p && keystore.getKey(id);
-  if (!key) return { error: `${p ? p.name : 'That model'} isn't connected yet. Add a key in Settings, AI models.` };
+  if (!key) return { error: `${p ? p.name : 'That model'} isn't connected yet. ${p && p.local ? 'Connect it' : 'Add a key'} in Settings, AI models.` };
   const requestId = String(options.requestId || '');
   const chatId = typeof options.chatId === 'string' ? options.chatId.slice(0, 80) : '';
   const model = modelFor(id);
@@ -416,7 +427,10 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
     memory: memoryAdapter(), clipboard: clipboardAdapter, scheduler,
     connectors: await connectorTools(),
     makePdf: sandbox.makePdf, downloads: app.getPath('downloads'),
-    web: options.web !== false, fetch: options.web !== false, code: options.code !== false,
+    // Web search and running code happen in the cloud providers' own sandboxes; reading a
+    // page (fetch_page) is Ilyra's and works with any model.
+    web: options.web !== false && p.canSearch !== false, fetch: options.web !== false,
+    code: options.code !== false && p.canRunCode !== false,
     thinking: options.voice ? 'off' : THINKING_LEVELS.includes(options.thinking) ? options.thinking : 'medium',
     voice: Boolean(options.voice),
     memoryNote,
@@ -495,7 +509,8 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
       return { error: `${p.name}: ${friendlyError(err)}`, outOfCredit: true };
     }
     // Once a tool has run (a file may have changed), never replay the request on another model.
-    if (toolRan || !tryAnotherModel(err)) return { error: `${p.name} (${model}): ${friendlyError(err)}` };
+    // Nor on another local one: loading a second model can take minutes and all its memory.
+    if (toolRan || p.local || !tryAnotherModel(err)) return { error: `${p.name} (${model}): ${friendlyError(err)}` };
 
     // The model was retired, renamed, isn't covered by this key's plan, or is overloaded: walk
     // down the best available ones, one quick try each, and keep whichever answers. Give up

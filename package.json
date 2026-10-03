@@ -10,7 +10,7 @@
     "predist": "node -e \"require('fs').rmSync('release',{recursive:true,force:true})\"",
     "dist": "electron-builder --win",
     "postdist": "node -e \"const fs=require('fs');for(const f of fs.readdirSync('release'))if(!f.endsWith('.exe'))fs.rmSync('release/'+f,{recursive:true,force:true})\"",
-    "test": "node test/mcp.test.js && node test/mcp-oauth.test.js && node test/location.test.js && node test/vad.test.js && node test/usage.test.js && node test/tone.test.js && node test/chat.test.js"
+    "test": "node test/mcp.test.js && node test/mcp-oauth.test.js && node test/location.test.js && node test/vad.test.js && node test/usage.test.js && node test/tone.test.js && node test/local.test.js && node test/chat.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

@@ -1,8 +1,10 @@
-// Talks to each AI provider through its official SDK: Claude, ChatGPT, Gemini and Meta.
+// Talks to each AI provider through its official SDK: Claude, ChatGPT, Gemini and Meta, plus
+// models on the user's own computer (see local.js).
 // Runs in the main process only; API keys never reach the page.
 const Anthropic = require('@anthropic-ai/sdk');
 const { default: OpenAI } = require('openai');
 const { GoogleGenAI } = require('@google/genai');
+const local = require('./local');
 
 // ---------- Shared helpers ----------
 
@@ -548,7 +550,10 @@ const PROVIDERS = {
       const ids = await PROVIDERS.meta.models(key);
       return ids.map((id) => ({ id, label: /contributor/.test(id) ? `${id}  (cheaper: Meta may train on your prompts)` : id }));
     }
-  }
+  },
+
+  // Ollama, LM Studio and other model servers the user runs themselves.
+  local
 };
 
 // ---------- Choosing a model ----------
@@ -579,6 +584,8 @@ const AVOID = /exp|tts|image|live|audio|embed|vision|thinking|contributor|transc
 
 // Every usable model, best first. Ilyra tries them in order until one answers.
 function rankModels(id, ids) {
+  // Local models have no "newest stable" order: whatever is installed, in the server's order.
+  if (PROVIDERS[id].local) return ids.slice();
   const ranked = [];
   // Claude's default is known-current; the others' defaults are only a fallback.
   if (id === 'claude' && ids.includes(PROVIDERS.claude.defaultModel)) ranked.push(PROVIDERS.claude.defaultModel);
