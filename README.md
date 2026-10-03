@@ -52,3 +52,7 @@ Produces `release/Ilyra Setup <version>.exe` (installer) and `release/Ilyra-<ver
 | `web/` | The interface: `index.html`, `styles.css`, `app.js`, the orb (`orb.js`, `miniorb.js`) and voice detection (`vad.js`) |
 | `scripts/` | Renders the app icon (`npm run icon`) |
 | `test/` | Tests, run with `npm test` |
+
+## License
+
+[MIT](LICENSE)

@@ -27,6 +27,7 @@
   },
   "main": "electron/main.js",
   "author": "Ilyra",
+  "license": "MIT",
   "build": {
     "appId": "app.ilyra.hub",
     "productName": "Ilyra",
