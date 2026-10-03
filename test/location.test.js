@@ -1,0 +1,21 @@
+const assert = require('assert');
+const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+const location = require('../electron/location');
+(async () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'loc-')), 'location.json');
+  let calls = 0, body = { success: true, city: 'Plano', region: 'Texas', country: 'United States', country_code: 'US', latitude: 33, longitude: -96.7, timezone: { id: 'America/Chicago' } };
+  location.init({ file, fetch: async () => { calls++; return { ok: true, json: async () => body }; } });
+  assert.strictEqual(location.current(), null);
+  let l = await location.refresh({ wait: 1000 });
+  assert.strictEqual(l.label, 'Plano, Texas'); assert.strictEqual(l.timezone, 'America/Chicago');
+  await location.refresh(); assert.strictEqual(calls, 1, 'a fresh answer is reused');
+  location.init({ file, fetch: async () => { throw new Error('offline'); } });
+  assert.strictEqual(location.current().label, 'Plano, Texas', 'the last place survives a restart and no network');
+  body = { success: true, city: 'Lyon', region: 'Auvergne', country: 'France', country_code: 'FR', timezone: { id: 'Europe/Paris' } };
+  location.init({ file, fetch: async () => ({ ok: true, json: async () => body }) });
+  l = await location.refresh({ force: true }); assert.strictEqual(l.label, 'Lyon, France', 'it follows you when you travel');
+  location.init({ file, fetch: async () => { throw new Error('offline'); } });
+  l = await location.refresh({ force: true }); assert.strictEqual(l.label, 'Lyon, France', 'lookup failure keeps the last place');
+  location.forget(); assert.strictEqual(location.current(), null);
+  console.log('location tests passed');
+})();

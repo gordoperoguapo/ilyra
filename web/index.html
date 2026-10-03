@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="icon" href="data:," />
+  <title>Ilyra</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ilyra-artifact: 'self'; media-src 'self' data: blob:" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+  <aside class="sidebar" id="sidebar" aria-label="Chats">
+    <div class="sidebar-head">
+      <img class="brand-mark" src="logo.svg" alt="" aria-hidden="true" />
+      <span class="brand-name">Ilyra</span>
+      <button class="icon-btn" id="titlesToggle" type="button" aria-pressed="false" aria-label="Blur chat titles" title="Blur chat titles (shown on hover)">
+        <svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A9.7 9.7 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.5 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.8 9.8 0 0 0 4.1-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+      </button>
+      <button class="icon-btn" id="sidebarClose" type="button" aria-label="Hide sidebar" title="Hide sidebar (Ctrl+B)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+      </button>
+    </div>
+    <div class="sidebar-tools">
+      <label class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <input id="chatSearch" type="search" placeholder="Search chats" autocomplete="off" spellcheck="false" aria-label="Search chats" />
+      </label>
+      <button class="new-chat" id="newChat" type="button" aria-label="New chat" title="New chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+    <nav class="chat-list" id="chatList" aria-label="Saved chats"></nav>
+    <div class="usage" id="usage" hidden>
+      <button class="usage-head" id="usageToggle" type="button" aria-expanded="false" title="Tokens used on this computer">
+        <span class="usage-title">Usage</span>
+        <span class="usage-num"><b id="usageToday">0</b> today</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+      </button>
+      <div class="usage-bar" id="usageBar" aria-hidden="true"></div>
+      <div class="usage-sub" id="usageMonth">0 this month</div>
+      <ul class="usage-list" id="usageList"></ul>
+    </div>
+    <div class="sidebar-foot">
+      <button class="foot-btn" id="statusButton" type="button" aria-haspopup="dialog">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Checking…</span>
+      </button>
+      <button class="foot-btn" id="settingsButton" type="button" aria-haspopup="dialog" aria-label="Settings" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.700 1.700 0 0 0 .3-1.800 1.700 1.700 0 0 0-1.500-1H3a2 2 0 1 1 0-4h.1a1.700 1.700 0 0 0 1.500-1.100 1.700 1.700 0 0 0-.3-1.800l-.1-.1a2 2 0 1 1 2.800-2.800l.1.1a1.700 1.700 0 0 0 1.800.3H9a1.700 1.700 0 0 0 1-1.500V3a2 2 0 1 1 4 0v.1a1.700 1.700 0 0 0 1 1.500 1.700 1.700 0 0 0 1.800-.3l.1-.1a2 2 0 1 1 2.800 2.800l-.1.1a1.700 1.700 0 0 0-.3 1.800V9a1.700 1.700 0 0 0 1.500 1H21a2 2 0 1 1 0 4h-.1a1.700 1.700 0 0 0-1.500 1z"/></svg>
+        <span class="foot-label">Settings</span>
+      </button>
+    </div>
+  </aside>
+  <div class="sidebar-scrim" id="sidebarScrim" hidden></div>
+  <div class="app">
+  <header class="top">
+    <button class="icon-btn sidebar-toggle" id="sidebarOpen" type="button" aria-label="Show sidebar" title="Show sidebar (Ctrl+B)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+    </button>
+    <button class="brand" id="homeButton" type="button" title="New chat" aria-label="Ilyra, start a new chat">
+      <img class="brand-mark" src="logo.svg" alt="" aria-hidden="true" />
+      <span class="brand-name">Ilyra</span>
+    </button>
+    <button class="chat-usage" id="chatUsage" type="button" hidden aria-label="Tokens used in this chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span>This chat</span><b>0</b><span>tokens</span></button>
+  </header>
+
+  <main class="main" id="main">
+    <section class="stage" id="stage" title="Home (new conversation)">
+      <div class="orb" id="orb">
+        <span class="ring ring-line"></span>
+        <span class="ring ring-sweep"></span>
+        <span class="ring ring-dash"></span>
+        <canvas id="orbCanvas"></canvas>
+      </div>
+      <p class="orb-state" id="orbState">Ready</p>
+    </section>
+
+    <section class="intro" id="intro">
+      <h1 id="greeting">Hello.</h1>
+      <p class="lede">What are we working on?</p>
+    </section>
+
+    <section class="thread" id="thread" aria-live="polite"></section>
+  </main>
+
+  <footer class="dock">
+    <div class="dock-inner">
+      <div class="approval-bar" id="approvalBar" role="status" hidden>
+        <span class="approval-text"></span>
+        <button class="link-btn" id="approvalOff" type="button">Turn off</button>
+      </div>
+      <div class="composer-wrap">
+        <div class="slash-menu" id="slashMenu" role="listbox" aria-label="Commands" hidden></div>
+        <div class="tools-panel" id="toolsPanel" role="dialog" aria-label="Model and tools" hidden>
+          <div class="tp-row">
+            <span class="tp-label">Model</span>
+            <div class="models" id="models" role="radiogroup" aria-label="Model"></div>
+          </div>
+          <div class="tp-row" id="versionRow" hidden>
+            <label class="tp-label" for="modelPick">Version</label>
+            <select class="model-pick" id="modelPick" aria-label="Model version"></select>
+          </div>
+          <div class="tp-row">
+            <label class="tp-label" for="thinkPick">Thinking</label>
+            <select class="model-pick" id="thinkPick" title="How hard the model thinks before answering. Higher is slower and costs more.">
+              <option value="off">Off</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
+            </select>
+          </div>
+          <div class="tp-toggles">
+            <button class="tp-toggle" id="webButton" type="button" aria-pressed="true" title="Web search: on. The model can look things up online.">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9S14.6 18.4 12 21c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3z"/></svg>
+              Web search <span class="tp-state">On</span>
+            </button>
+            <button class="tp-toggle" id="codeButton" type="button" aria-pressed="true" title="Run code: on. The model can run Python in a private sandbox to calculate, analyze data and make charts.">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></svg>
+              Run code <span class="tp-state">On</span>
+            </button>
+            <button class="tp-toggle" id="captureButton" type="button" title="Take a picture of your screen and attach it, so you can ask about what is on it">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+              Capture screen
+            </button>
+            <button class="tp-toggle" id="attachButton" type="button" title="Attach an image (or paste one)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l9-9a3.7 3.7 0 0 1 5.2 5.2l-9 9a1.8 1.8 0 0 1-2.6-2.6l8.3-8.3"/></svg>
+              Attach image
+            </button>
+          </div>
+        </div>
+        <form class="composer" id="composer">
+          <div class="attachments" id="attachments" hidden></div>
+          <div class="composer-in">
+            <textarea id="prompt" rows="1" placeholder="Ask Ilyra anything…" aria-label="Message"></textarea>
+            <button class="tools-pill" id="toolsButton" type="button" aria-expanded="false" aria-controls="toolsPanel" title="Model, thinking and tools">
+              <i aria-hidden="true"></i><span id="toolsLabel">Auto</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+            </button>
+            <input type="file" id="fileInput" accept="image/*" multiple hidden />
+            <button class="icon-btn" id="micButton" type="button" aria-label="Dictate" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+            </button>
+            <button class="icon-btn talk-btn" id="talkButton" type="button" aria-label="Talk mode" aria-pressed="false" title="Talk mode: speak back and forth with Ilyra (Ctrl+Shift+Space)" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/></svg>
+            </button>
+            <button class="send-btn" id="sendButton" type="submit" aria-label="Send" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" stroke-linejoin="miter"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+            </button>
+          </div>
+        </form>
+      </div>
+      <p class="hint" id="hint"></p>
+    </div>
+  </footer>
+  </div>
+  <aside class="artifact" id="artifact" aria-label="Preview" hidden>
+    <div class="artifact-resize" id="artifactResize" role="separator" aria-orientation="vertical" aria-label="Resize preview" title="Drag to resize" tabindex="0"></div>
+    <div class="artifact-head">
+      <span class="artifact-title" id="artifactTitle">Preview</span>
+      <div class="artifact-actions">
+      <button class="icon-btn" id="artifactReload" type="button" aria-label="Reload preview" title="Reload">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
+      </button>
+      <button class="icon-btn" id="artifactSave" type="button" aria-label="Save as HTML file" title="Save as HTML file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+      </button>
+      <button class="icon-btn" id="artifactClose" type="button" aria-label="Close preview" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+      </div>
+    </div>
+    <div class="artifact-note" id="artifactNote" hidden>
+      <span>Offline preview: Ilyra read your files, chats or clipboard in this reply, so this page can't connect to the internet or open links.</span>
+      <button class="link-btn" id="artifactOnline" type="button">Allow internet</button>
+    </div>
+    <iframe class="artifact-frame" id="artifactFrame" title="Preview" sandbox="allow-scripts allow-forms allow-modals allow-pointer-lock"></iframe>
+  </aside>
+  </div>
+
+  <dialog class="sheet prefs" id="settingsSheet" aria-labelledby="settingsTitle">
+    <nav class="prefs-nav" role="tablist" aria-label="Settings">
+      <h1 class="prefs-title" id="settingsTitle">Settings</h1>
+      <div class="nav-group">Ilyra</div>
+      <button type="button" class="nav-item" role="tab" data-page="general" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>General</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="routing" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H12a3 3 0 0 1 3 3M8.5 18H12a3 3 0 0 0 3-3"/></svg><span>Who handles what</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="memory" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg><span>Memory</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="briefs" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg><span>Briefs</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="voice" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>Voice</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="tasks" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span>Scheduled tasks</span></button>
+      <div class="nav-group">Connections</div>
+      <button type="button" class="nav-item" role="tab" data-page="keys" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M9 9h6M9 12h6M9 15h3"/></svg><span>AI models</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="connectors" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><path d="M17 13.5v7M13.5 17h7"/></svg><span>Connectors</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="files" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Files</span></button>
+    </nav>
+    <div class="prefs-main" tabindex="-1" autofocus>
+      <button class="icon-btn prefs-close" type="button" id="closeSettings" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      <section class="page" data-page="general" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>General</h2><p class="page-sub">How Ilyra runs on this computer.</p></div></header>
+        <div class="rows">
+          <label class="check"><span>Keep running in the background<small>Ilyra stays in the tray when you close the window.</small></span><input type="checkbox" id="bgMode" /></label>
+          <label class="check"><span>Start Ilyra when I sign in to Windows</span><input type="checkbox" id="startLogin" /></label>
+          <label class="check"><span>Know where I am<small>Looks up your city from your internet address (no GPS) so weather and "near me" questions just work, and follows you when you travel. The lookup service sees your IP address; a VPN shows the VPN's city.</small></span><input type="checkbox" id="useLocation" /></label>
+        </div>
+      </section>
+      <section class="page" data-page="routing" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Who handles what</h2><p class="page-sub">Choose which AI Ilyra uses for each kind of request. Automatic lets Ilyra decide. A choice that isn't connected is greyed out.</p></div></header>
+        <div class="route-list" id="routeList"></div>
+      </section>
+      <section class="page" data-page="memory" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Memory</h2><p class="page-sub">Ilyra reads this at the start of every chat, so it knows who you are. Stored encrypted on this computer.</p></div></header>
+        <textarea class="settings-textarea" id="memoryText" rows="9" maxlength="6000" placeholder="I'm Alex. I'm learning to code, mostly Python. I prefer short, direct answers."></textarea>
+        <div class="settings-row"><span class="settings-count" id="memoryCount"></span><button class="save" id="memorySave" type="button">Save</button></div>
+        <div class="rows">
+          <label class="check"><span>Save to memory without asking first<small>Otherwise Ilyra asks each time it wants to remember something.</small></span><input type="checkbox" id="autoMemory" /></label>
+        </div>
+      </section>
+      <section class="page" data-page="briefs" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Briefs</h2><p class="page-sub">A short page about each part of your life or work, read at the start of every chat so Ilyra knows it exists. Start each with a heading. Stored encrypted on this computer.</p></div></header>
+        <textarea class="settings-textarea" id="briefsText" rows="12" maxlength="8000" placeholder="## My bakery&#10;I own Rise &amp; Shine, a two-person bakery in Tulsa. Busy season is November to December."></textarea>
+        <div class="settings-row"><span class="settings-count" id="briefsCount"></span><button class="save" id="briefsSave" type="button">Save</button></div>
+      </section>
+      <section class="page" data-page="voice" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Voice</h2><p class="page-sub">The voice Ilyra uses to read replies aloud in talk mode. It needs a ChatGPT key; without one, Ilyra uses the Windows voice.</p></div></header>
+        <div class="rows">
+          <div class="row"><span>Voice</span><select class="model-pick" id="voicePick" aria-label="Voice">
+          <option value="marin">Marin</option>
+          <option value="cedar">Cedar</option>
+          <option value="nova">Nova</option>
+          <option value="alloy">Alloy</option>
+          <option value="ash">Ash</option>
+          <option value="ballad">Ballad</option>
+          <option value="coral">Coral</option>
+          <option value="echo">Echo</option>
+          <option value="fable">Fable</option>
+          <option value="onyx">Onyx</option>
+          <option value="sage">Sage</option>
+          <option value="shimmer">Shimmer</option>
+          <option value="verse">Verse</option>
+          <option value="windows">Windows (free, offline)</option>
+        </select></div>
+          <div class="row"><span>Speaking speed</span><select class="model-pick voice-speed" id="speedPick" aria-label="Speaking speed">
+          <option value="1">1×</option>
+          <option value="1.15">1.15×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.4">1.4×</option>
+          <option value="1.6">1.6×</option>
+        </select></div>
+          <div class="row"><span>Hear it<small>Plays a short sample with the settings above.</small></span><button type="button" class="save" id="voiceTest">Play sample</button></div>
+        </div>
+      </section>
+      <section class="page" data-page="tasks" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Scheduled tasks</h2><p class="page-sub">Ask Ilyra in a chat: "Remind me at 3:30" or "Every weekday at 8, brief me on the news". Ilyra has to be running at that time.</p></div></header>
+        <div class="task-list" id="taskList"></div>
+      </section>
+      <section class="page" data-page="keys" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>AI models</h2><p class="page-sub">Keys are encrypted and stored only on this computer. They go straight to each provider and nowhere else.</p></div></header>
+        <ul class="provider-list rows" id="providerList"></ul>
+        <p class="sheet-note" id="sheetNote"></p>
+      </section>
+      <section class="page" data-page="connectors" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Connectors</h2><p class="page-sub">Services Ilyra can reach for you. Your models can use them; Ilyra asks before each use unless you trust the connector.</p></div></header>
+        <div class="rows" id="connectorsCard" hidden>
+          <div class="list-head"><span>Connector</span><span id="connectorsState"></span></div>
+          <ul class="connector-list" id="connectorList"></ul>
+        </div>
+        <h3 class="section-title">Add a connector</h3>
+        <form class="connector-form" id="connectorForm">
+          <input id="connectorName" autocomplete="off" spellcheck="false" aria-label="Connector name" placeholder="Name, like Higgsfield" />
+          <input id="connectorUrl" autocomplete="off" spellcheck="false" aria-label="Connector address" placeholder="Address (https://…/mcp)" />
+          <input class="key wide" id="connectorToken" type="password" autocomplete="off" spellcheck="false" aria-label="Connector token" placeholder="Token or API key (leave empty to sign in with your browser)" />
+          <button type="submit" class="save" id="connectorAdd">Add</button>
+          <p class="provider-row-msg wide" id="connectorMsg" role="status"></p>
+        </form>
+        <p class="page-foot">Connectors work with services that support MCP, like Higgsfield. If one needs a sign-in, Ilyra opens your browser.</p>
+      </section>
+      <section class="page" data-page="files" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Files</h2><p class="page-sub">Folders Ilyra can read, and edit after you approve each change.</p></div></header>
+        <ul class="folder-list rows" id="folderList"></ul>
+        <button type="button" class="save folder-add" id="addFolder">Share a folder</button>
+        <p class="page-foot">Old copies are kept for two weeks in Ilyra's backups folder. Files that usually hold secrets (.env, private keys, credentials) are always off limits.</p>
+      </section>
+    </div>
+  </dialog>
+
+  <script src="../node_modules/marked/lib/marked.umd.js"></script>
+  <script src="../node_modules/dompurify/dist/purify.min.js"></script>
+  <script src="orb.js"></script>
+  <script src="miniorb.js"></script>
+  <script src="vad.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

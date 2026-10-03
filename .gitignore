@@ -1,0 +1,15 @@
+node_modules/
+dist/
+release/
+
+# Secrets: never commit these (Ilyra keeps keys in its encrypted key store, not in files)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+*.p8
