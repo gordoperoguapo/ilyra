@@ -7,14 +7,31 @@ const MAX_STEPS = 12;
 const CLIPBOARD_WORDS = /\b(clipboard|copied|copy|copying|paste|pasted)\b/i;
 const MEMORY_WORDS = /\b(remember|forget|memory|memori[sz]e|keep in mind)\b/i;
 const TASK_WORDS = /\b(remind|reminder|schedule[ds]?|tasks?|every (day|morning|evening|night|week|weekday|month)|daily|weekly|alarm|timer)\b/i;
+// A file named by its extension ("notes.txt") counts too.
+const FILE_WORDS = /\b(files?|folders?|save|edit|rename)\b|\.[a-z0-9]{1,5}\b/i;
+const CHAT_WORDS = /\b(chats?|conversations?|earlier|before|last time|yesterday|you said|i said|we (talked|discussed|said))\b/i;
+const FILE_TOOLS = ['list_files', 'read_file', 'search_files', 'write_file', 'edit_file'];
+// Local models call tools at random, so the ones that do something are offered only when the
+// message is about them. A small one (on the short prompt) gets the same rule for reading.
 const LOCAL_TOOL_WORDS = {
   save_memory: MEMORY_WORDS,
   forget_memory: MEMORY_WORDS,
   schedule_task: TASK_WORDS,
   list_tasks: TASK_WORDS,
   cancel_task: TASK_WORDS,
+  write_file: FILE_WORDS,
+  edit_file: FILE_WORDS,
   make_pdf: /\bpdf\b/i,
   generate_image: /\b(draw|drawing|image|picture|photo|logo|illustration|icon|paint|sketch|wallpaper)\b/i
+};
+const LEAN_TOOL_WORDS = {
+  fetch_page: /https?:\/\/|\bwww\.|\b[a-z0-9-]+\.(com|org|net|io|dev|ai|co|gov|edu)\b|\b(web ?page|site|website|link|url|article)\b/i,
+  list_files: FILE_WORDS,
+  read_file: FILE_WORDS,
+  search_files: FILE_WORDS,
+  search_chats: CHAT_WORDS,
+  list_chats: CHAT_WORDS,
+  read_chat: CHAT_WORDS
 };
 
 // ---------- System prompt ----------
@@ -26,6 +43,15 @@ const IDENTITY = [
 ];
 
 const PAGES = 'Ilyra has a live preview panel for web pages. When the user asks you to build a web page, site, landing page, app, tool, game, dashboard, UI mockup or interactive visual, reply with ONE complete, self-contained HTML document in a single ```html code block (CSS and JavaScript inline; scripts, styles and fonts from https CDNs are fine). Ilyra opens it for the user as a working, clickable preview beside the chat. Never say you can\'t render or preview HTML, and don\'t tell the user to save the file or use another app to see it. Keep the text around the code short. To change a page, send the full updated document again. Only load scripts and data from real, well-known public URLs you are sure exist and need no API key; never invent endpoints. If the page needs live data you can\'t get that way, fill it with the facts from your answer instead.';
+
+// For a small local model. Kept narrow on purpose: broad "be brief / be careful" rules make a
+// small model hedge and say little.
+const LEAN = 'Answer fully and helpfully, with your own opinion when asked. For a quick reaction ("nice", "ok"), a sentence is enough. Never make up facts about the user, live information (weather, news, prices) or sources, and never claim you did something (checked traffic, sent a message) you did not.';
+// A small model only hears about the preview panel when the user asks for a page.
+const WANTS_PAGE = /\b(build|make|create|design|code|write|generate)\b[^.?!]{0,50}\b(page|site|website|app|game|dashboard|ui|html|landing|tool|calculator|widget|mockup)\b/i;
+
+// What each cloud model is good at, for a local model deciding whom to ask.
+const STRENGTHS = { claude: 'code, long documents and planning', chatgpt: 'writing and everyday tasks', gemini: 'research, current events and images', meta: 'long context and reasoning' };
 
 const VOICE = 'The user is talking to you by voice and your reply will be read aloud. Answer conversationally in one to three short sentences, the way a person talks. No Markdown, lists, headings, tables, emoji or URLs. If they ask for something long (code, a page, a detailed plan), give a one-sentence spoken summary and say it is in the chat.';
 
@@ -61,12 +87,11 @@ function memoryLines(memory) {
 }
 
 // p: { roots, tools, draw, search, runCode, remember, schedule, fetch, pdf, memory, briefs,
-//      summary, hereNote, connectorNames, usageNote }
+//      summary, hereNote, connectorNames, usageNote, lean, pages, askNames, chats, files }
 function systemPrompt(p) {
-  const lines = IDENTITY.concat(
-    `Now: ${new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })} (${Intl.DateTimeFormat().resolvedOptions().timeZone}).`,
-    PAGES
-  );
+  const lines = IDENTITY.concat(`Now: ${new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })} (${Intl.DateTimeFormat().resolvedOptions().timeZone}).`);
+  if (p.pages !== false) lines.push(PAGES);
+  if (p.lean) lines.push(LEAN);
 
   // What Ilyra knows about the user and this chat.
   if (p.memory) lines.push(...memoryLines(p.memory));
@@ -93,12 +118,12 @@ function systemPrompt(p) {
       'If generate_image fails, tell the user the exact error and what to try (for example another provider); do not draw the image with code instead.'
     );
   }
-  lines.push(
-    "You can search and read the user's saved Ilyra chats (search_chats, list_chats, read_chat). Use them whenever the user refers to an earlier conversation instead of saying you can't see it.",
-    p.roots.length
-      ? `You can read and edit files in these shared folders: ${p.roots.join(', ')}. Read a file before editing it. Every write asks the user to approve, so make one focused change at a time and say what you changed.`
-      : 'No folders are shared yet. If the user wants you to read or change files, tell them to add a folder in Settings, Files.'
-  );
+  if (p.askNames && p.askNames.length) {
+    lines.push(`You run privately on the user's own computer, and can hand work to cloud models with ask_model: ${p.askNames.map((n) => `${n} (${STRENGTHS[n] || 'general'})`).join('; ')}. Answer chat, simple questions and quick tasks yourself. Use ask_model for hard coding or debugging, long or careful reasoning, large documents, anything that needs a web search, or when the user names a model. Put everything the other model needs in the question; it cannot see this chat. Never send passwords or secrets. Then give the user the answer and say which model helped.`);
+  }
+  if (p.chats !== false) lines.push("You can search and read the user's saved Ilyra chats (search_chats, list_chats, read_chat). Use them whenever the user refers to an earlier conversation instead of saying you can't see it.");
+  if (!p.roots.length) lines.push('No folders are shared yet. If the user wants you to read or change files, tell them to add a folder in Settings, Files.');
+  else if (p.files !== false) lines.push(`You can read and edit files in these shared folders: ${p.roots.join(', ')}. Read a file before editing it. Every write asks the user to approve, so make one focused change at a time and say what you changed.`);
   return lines.join('\n');
 }
 
@@ -107,7 +132,7 @@ function systemPrompt(p) {
 // opts: { id, key, model, messages, roots, confirm, signal, retries, timeout, thinking, voice,
 //         useTools, web, fetch, code, generateImage, forceTool, memory, clipboard, scheduler,
 //         makePdf, downloads, fetchPage, connectors, here, hereNote, briefs, summary, usageNote,
-//         memoryNote, systemOverride,
+//         memoryNote, systemOverride, lean, askModel, askNames,
 //         onText, onThinking, onTool, onImage, onRun, onSources, onUsage }
 async function runAgent(opts) {
   const adapter = PROVIDERS[opts.id].adapter;
@@ -129,13 +154,15 @@ async function runAgent(opts) {
     schedule_task: Boolean(opts.scheduler),
     list_tasks: Boolean(opts.scheduler),
     cancel_task: Boolean(opts.scheduler),
-    make_pdf: Boolean(opts.makePdf)
+    make_pdf: Boolean(opts.makePdf),
+    ask_model: Boolean(opts.askModel)
   };
-  // Small local models call tools at random, so the ones that do something get offered only
-  // when the message is about them. (Ilyra still learns what the user shares; see profile.js.)
-  if (PROVIDERS[opts.id].local) {
-    for (const [name, words] of Object.entries(LOCAL_TOOL_WORDS)) gate[name] = gate[name] && words.test(lastText);
-  }
+  // With no folder shared, the file tools can only fail (the prompt says to share one instead).
+  for (const name of FILE_TOOLS) gate[name] = Boolean(opts.roots && opts.roots.length);
+  // A local model gets fewer tools (see LOCAL_TOOL_WORDS). Without the memory tools, Ilyra still
+  // learns what the user shares (see profile.js).
+  const narrowed = PROVIDERS[opts.id].local ? Object.assign({}, LOCAL_TOOL_WORDS, opts.lean ? LEAN_TOOL_WORDS : {}) : {};
+  for (const [name, words] of Object.entries(narrowed)) gate[name] = gate[name] !== false && words.test(lastText);
   const connectors = useTools && opts.connectors && opts.connectors.defs.length ? opts.connectors : null;
   const defs = useTools ? tools.DEFINITIONS.filter((d) => gate[d.name] !== false).concat(connectors ? connectors.defs : []) : [];
 
@@ -154,7 +181,12 @@ async function runAgent(opts) {
     summary: opts.summary,
     hereNote: opts.hereNote,
     usageNote: opts.usageNote,
-    connectorNames: connectors ? connectors.names : null
+    connectorNames: connectors ? connectors.names : null,
+    askNames: gate.ask_model ? opts.askNames : null,
+    chats: gate.search_chats !== false,
+    files: gate.read_file !== false,
+    lean: Boolean(opts.lean),
+    pages: !opts.lean || WANTS_PAGE.test(lastText)
   });
   // Whatever model answers is told what was just saved, so it never claims otherwise.
   if (opts.memoryNote) system += `\n\nWhat just happened with memory (tell the user in your own words, in one short sentence): ${opts.memoryNote}`;
@@ -166,7 +198,7 @@ async function runAgent(opts) {
   const ctx = {
     roots: opts.roots || [], confirm: opts.confirm, generateImage: opts.generateImage, onImage: opts.onImage || (() => {}),
     memory: opts.memory, clipboard: opts.clipboard, scheduler: opts.scheduler, fetchPage: opts.fetchPage,
-    makePdf: opts.makePdf, downloads: opts.downloads, here: opts.here
+    makePdf: opts.makePdf, downloads: opts.downloads, here: opts.here, askModel: opts.askModel
   };
   let full = '';
   const sources = [];

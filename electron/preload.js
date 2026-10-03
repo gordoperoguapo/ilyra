@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('ilyra', {
   setModel: invoke('providers:setModel'),
   openKeyPage: invoke('providers:keyPage'),
   findLocalServer: invoke('providers:findLocal'),
+  warmLocal: invoke('local:warm'),
   usage: { get: invoke('usage:get') },
 
   // Chat

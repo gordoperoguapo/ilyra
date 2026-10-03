@@ -1,7 +1,7 @@
 // The tools Ilyra's models can call on this computer: saved chats, memory, the clipboard,
-// scheduled tasks, images, PDFs, web pages, and files inside the folders the user shared.
-// Anything that changes something asks the user first, and a file is backed up before it is
-// overwritten (in the backups folder in Ilyra's data folder).
+// scheduled tasks, images, PDFs, web pages, other models, and files inside the folders the
+// user shared. Anything that changes something asks the user first, and a file is backed up
+// before it is overwritten (in the backups folder in Ilyra's data folder).
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -189,6 +189,11 @@ const DEFINITIONS = [
     parameters: { type: 'object', properties: { prompt: str('A detailed description of the image, or of the edit to make'), provider: str('Optional: "gemini" or "chatgpt". Leave out to use the best available.') }, required: ['prompt'] }
   },
   {
+    name: 'ask_model',
+    description: 'Hand a task to a stronger cloud model and get its answer back. Use it for hard coding, long or careful reasoning, big documents, anything that needs a web search, or when the user asks for a specific model. The other model cannot see this chat, so the question must contain everything it needs.',
+    parameters: { type: 'object', properties: { provider: str('Which model: claude, chatgpt, gemini or meta'), question: str('The complete request, with all the context the other model needs') }, required: ['provider', 'question'] }
+  },
+  {
     name: 'search_chats',
     description: "Search the user's saved Ilyra conversations by keyword. Use this when they refer to something said in an earlier chat.",
     parameters: { type: 'object', properties: { query: str('Words to look for') }, required: ['query'] }
@@ -350,6 +355,25 @@ const RUNNERS = {
       summary: `generated ${res.images.length === 1 ? 'an image' : res.images.length + ' images'} with ${res.model}`,
       output: `Generated ${res.images.length} image(s) with ${res.model} and showed them to the user in the chat.${res.text ? ' The image model said: ' + res.text : ''} Do not describe them at length; a short note is enough.`
     };
+  },
+  async ask_model({ provider, question }, ctx) {
+    if (!ctx.askModel) throw new Error('No cloud models are connected.');
+    ctx.askCount = (ctx.askCount || 0) + 1;
+    if (ctx.askCount > 3) throw new Error('You have already asked other models three times in this reply. Answer with what you have.');
+    const text = String(question || '').slice(0, 20000);
+    // The question leaves this computer, so once local data has been read it is shown first.
+    if (ctx.localDataRead) {
+      if (text.length > MAX_REVIEW) throw new Error(`That question is ${text.length} characters, too long for the user to review in full (limit ${MAX_REVIEW}). Ask a shorter one.`);
+      const ok = await ctx.confirm({
+        kind: 'ask',
+        title: `Ilyra wants to ask ${String(provider || 'a cloud model')}`,
+        path: 'Sent to a cloud model',
+        detail: `Ilyra has already read your files, chats or clipboard in this reply. This question goes to a cloud model, shown in full:\n\n${visible(text)}`
+      });
+      if (!ok) throw new Error('The user declined to send that to a cloud model.');
+    }
+    const res = await ctx.askModel({ provider: String(provider || '').toLowerCase(), question: text });
+    return { summary: `asked ${res.name} (${res.model})`, output: `${res.name} answered:\n\n${res.text}\n\nUse this to answer the user, and say it came from ${res.name}.` };
   },
   async search_chats({ query }) {
     const hits = store.chats.search(query);

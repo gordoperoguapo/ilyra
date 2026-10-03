@@ -15,12 +15,18 @@ const KNOWN_SERVERS = [
 ];
 const PROBE_TIMEOUT = 3000;
 const CHAT_TIMEOUT = 600000; // a big model can take minutes to load on the first message
-// Ollama's default context is small and silently drops the start of a long chat (Ilyra's
-// instructions and tools alone are about 3k tokens). 8k still fits beside a 7-8B model on a
-// 6-8 GB graphics card. Every call uses the same value, or Ollama reloads the model.
-const OLLAMA_CONTEXT = 8192;
+const WARM_TIMEOUT = 300000;
 // Embedding, reranking and speech models show up in the lists but can't chat.
 const NOT_CHAT = /embed|bge-|nomic|minilm|rerank|whisper|tts/i;
+
+// The context size Ilyra asks Ollama for (Settings, AI models). Ollama's own default is small
+// and silently drops the start of a long chat; Ilyra's instructions and tools alone are about 3k
+// tokens. Every call uses the same value, or Ollama reloads the model. Other servers set it
+// themselves when they load the model.
+let contextSize = 8192;
+function configure({ context } = {}) {
+  if (Number.isFinite(context) && context > 0) contextSize = context;
+}
 
 // "localhost:11434", "http://localhost:1234/v1/" and the like, as one canonical address.
 function normalizeAddress(input) {
@@ -59,41 +65,73 @@ async function request(address, path, { body, signal, timeout = CHAT_TIMEOUT } =
   return res;
 }
 
-// Which API the server speaks, remembered per address.
+// Which API the server speaks, and each model's size in billions of parameters, remembered per
+// address.
 const kinds = new Map();
+const sizes = new Map();
+
+// "8.0B" -> 8, "567M" -> 0.567, anything else -> null.
+function billions(text) {
+  const m = /(\d+(?:\.\d+)?)\s*([bm])\b/i.exec(String(text || ''));
+  if (!m) return null;
+  return parseFloat(m[1]) / (m[2].toLowerCase() === 'm' ? 1000 : 1);
+}
 
 async function ollamaModels(address, timeout) {
   const j = await (await request(address, '/api/tags', { timeout })).json();
   if (!j || !Array.isArray(j.models)) throw new Error('Not an Ollama server.');
   // Newer versions of Ollama say what each model can do; older ones are judged by name.
   const chats = (m) => (Array.isArray(m.capabilities) ? !m.capabilities.includes('embedding') : !NOT_CHAT.test(m.name));
-  return j.models.filter((m) => m.name && chats(m)).map((m) => ({ id: m.name, size: m.size }));
+  return j.models.filter((m) => m.name && chats(m))
+    .map((m) => ({ id: m.name, bytes: m.size, params: billions(m.details && m.details.parameter_size) }));
 }
 
 async function openaiModels(address, timeout) {
   const j = await (await request(address, '/v1/models', { timeout })).json();
   if (!j || !Array.isArray(j.data)) throw new Error('Not an OpenAI-compatible server.');
-  return j.data.filter((m) => m.id && !NOT_CHAT.test(m.id)).map((m) => ({ id: m.id }));
+  return j.data.filter((m) => m.id && !NOT_CHAT.test(m.id)).map((m) => ({ id: m.id, params: null }));
 }
 
 // The models the server has, and which API it speaks. Ollama is asked first because its own
 // API can set the context size; anything else is treated as OpenAI-compatible.
 async function inspect(address, timeout = PROBE_TIMEOUT) {
+  let found = null;
   try {
-    const models = await ollamaModels(address, timeout);
-    kinds.set(address, 'ollama');
-    return { kind: 'ollama', models };
+    found = { kind: 'ollama', models: await ollamaModels(address, timeout) };
   } catch (err) {
     if (/can't reach/.test(err.message)) throw err;
   }
-  try {
-    const models = await openaiModels(address, timeout);
-    kinds.set(address, 'openai');
-    return { kind: 'openai', models };
-  } catch (err) {
-    if (/can't reach|took too long/.test(err.message)) throw err;
-    throw new Error(`Something answered at ${address}, but it isn't a model server Ilyra knows (Ollama, or one with an OpenAI-compatible API).`);
+  if (!found) {
+    try {
+      found = { kind: 'openai', models: await openaiModels(address, timeout) };
+    } catch (err) {
+      if (/can't reach|took too long/.test(err.message)) throw err;
+      throw new Error(`Something answered at ${address}, but it isn't a model server Ilyra knows (Ollama, or one with an OpenAI-compatible API).`);
+    }
   }
+  kinds.set(address, found.kind);
+  for (const m of found.models) sizes.set(`${address} ${m.id}`, m.params);
+  return found;
+}
+
+async function kindOf(address) {
+  return kinds.get(address) || (await inspect(address)).kind;
+}
+
+// A model's size in billions of parameters: what the server reported, else the number in its
+// name ("llama-3.1-70b-instruct"), else null.
+function sizeOf(address, model) {
+  const known = sizes.get(`${address} ${model}`);
+  if (known) return known;
+  const named = /(?:^|[^a-z\d.])(\d+(?:\.\d+)?)b\b/i.exec(String(model || '').split('/').pop());
+  return named ? parseFloat(named[1]) : null;
+}
+
+// Loads the model ahead of a message (when talk mode starts), with the same settings chat
+// uses, so the first reply doesn't wait for it. Only Ollama can be asked to.
+async function warm(address, model) {
+  if (await kindOf(address) !== 'ollama') return;
+  await request(address, '/api/generate', { body: { model, options: { num_ctx: contextSize } }, timeout: WARM_TIMEOUT });
 }
 
 async function kindOf(address) {
@@ -153,6 +191,35 @@ function thinkSplitter(onText, onThinking) {
   };
 }
 
+// Small models sometimes write a tool call as text instead of making it. A reply that is only
+// {"name": ..., "parameters": ...} is held back and turned into the call it meant; anything
+// else passes straight through. Only used when tools were offered.
+function textCallCatcher(onText) {
+  let state = 'undecided'; // then 'holding' or 'passing'
+  let buffer = '';
+  return {
+    onText(s) {
+      if (state === 'passing') return onText(s);
+      buffer += s;
+      if (state === 'holding' || !buffer.trim()) return;
+      if (buffer.trimStart()[0] === '{') { state = 'holding'; return; }
+      state = 'passing';
+      onText(buffer);
+    },
+    // The call, or null after showing whatever was held.
+    end() {
+      if (state !== 'holding') return null;
+      try {
+        const j = JSON.parse(buffer);
+        const args = j.parameters || j.arguments;
+        if (typeof j.name === 'string' && args && typeof args === 'object') return { name: j.name, args };
+      } catch { /* not JSON after all */ }
+      onText(buffer);
+      return null;
+    }
+  };
+}
+
 // Reads a streamed body line by line.
 async function eachLine(body, handle) {
   const decoder = new TextDecoder();
@@ -188,7 +255,7 @@ async function ollamaStep({ address, model, system, native, tools, thinking, sig
   const notes = [];
   let messages = native.map((m) => (m.images ? { ...m, images: m.images.map((i) => i.data) } : m));
   if (caps && !caps.has('vision') && native.some((m) => m.images)) messages = withoutImages(native);
-  const body = { model, messages: [{ role: 'system', content: system }].concat(messages), stream: true, options: { num_ctx: OLLAMA_CONTEXT } };
+  const body = { model, messages: [{ role: 'system', content: system }].concat(messages), stream: true, options: { num_ctx: contextSize } };
   if (tools.length && (!caps || caps.has('tools'))) body.tools = toolDefinitions(tools);
   else if (tools.length) notes.push(`${model} can't use tools, so this answer can't read files, make images or search your chats.`);
   const level = thinking || 'medium';
@@ -217,7 +284,8 @@ async function ollamaStep({ address, model, system, native, tools, thinking, sig
     }
   }
 
-  const split = thinkSplitter(onText, onThinking);
+  const catcher = textCallCatcher(onText);
+  const split = thinkSplitter(body.tools ? catcher.onText : onText, onThinking);
   let thought = '';
   let usage = null;
   const calls = [];
@@ -236,6 +304,11 @@ async function ollamaStep({ address, model, system, native, tools, thinking, sig
     }
   });
   const out = split.end();
+  const textCall = body.tools ? catcher.end() : null;
+  if (textCall) {
+    if (!calls.length) calls.push({ id: 'call_0', ...textCall });
+    out.text = '';
+  }
   const raw = { role: 'assistant', content: out.text };
   if (thought || out.thought) raw.thinking = thought || out.thought;
   if (calls.length) raw.tool_calls = calls.map((c) => ({ function: { name: c.name, arguments: c.args } }));
@@ -278,7 +351,8 @@ async function openaiStep({ address, model, system, native, tools, signal, onTex
     }
   }
 
-  const split = thinkSplitter(onText, onThinking);
+  const catcher = textCallCatcher(onText);
+  const split = thinkSplitter(body.tools ? catcher.onText : onText, onThinking);
   let thought = '';
   let usage = null;
   const pending = []; // tool calls arrive in pieces, keyed by index
@@ -305,6 +379,11 @@ async function openaiStep({ address, model, system, native, tools, signal, onTex
     try { args = c.args ? JSON.parse(c.args) : {}; } catch { /* bad JSON: the tool will report the missing fields */ }
     return { id: c.id || `call_${n}`, name: c.name, args, argsText: c.args || '{}' };
   });
+  const textCall = body.tools ? catcher.end() : null;
+  if (textCall) {
+    if (!calls.length) calls.push({ id: 'call_0', ...textCall, argsText: JSON.stringify(textCall.args) });
+    out.text = '';
+  }
   const raw = { role: 'assistant', content: out.text || null };
   if (calls.length) raw.tool_calls = calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.argsText } }));
   return { text: out.text, calls, raw, usage, notes };
@@ -344,14 +423,17 @@ module.exports = {
   canSearch: false,
   canRunCode: false,
   adapter,
+  configure,
   normalizeAddress,
   find,
+  sizeOf,
+  warm,
 
   async models(address) {
     return (await inspect(address)).models.map((m) => m.id);
   },
 
   async listModels(address) {
-    return (await inspect(address)).models.map((m) => ({ id: m.id, label: m.size ? `${m.id}  (${(m.size / 1e9).toFixed(1)} GB)` : m.id }));
+    return (await inspect(address)).models.map((m) => ({ id: m.id, label: m.bytes ? `${m.id}  (${(m.bytes / 1e9).toFixed(1)} GB)` : m.id }));
   }
 };

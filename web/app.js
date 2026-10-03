@@ -56,7 +56,8 @@
   // Did it read the user's own files, chats or clipboard? Then its previews run offline.
   var localDataTouched = false;
   // Tool events that never expose the user's own files, chats or clipboard.
-  var OUTSIDE_TOOLS = { connector: 1, web_search: 1, fetch_page: 1, generate_image: 1, memory: 1, note: 1 };
+  var OUTSIDE_TOOLS = { connector: 1, web_search: 1, fetch_page: 1, generate_image: 1, ask_model: 1, memory: 1, note: 1 };
+  var connectorNames = []; // lower case, for routing messages that mention one
 
   // Preferences kept between sessions
   var webOn = true;
@@ -92,7 +93,7 @@
       usage: ['Checking usage…', 'Checked usage'],
       read_file: ['Reading files…', 'Read files'], list_files: ['Reading files…', 'Read files'], search_files: ['Reading files…', 'Read files'],
       write_file: ['Editing a file…', 'Edited a file'], edit_file: ['Editing a file…', 'Edited a file'],
-      generate_image: ['Making an image…', 'Made an image'],
+      generate_image: ['Making an image…', 'Made an image'], ask_model: ['Asking another model…', 'Asked another model'],
       save_memory: ['Updating memory…', 'Updated memory'], forget_memory: ['Updating memory…', 'Updated memory'], memory: ['Updating memory…', 'Updated memory'],
       read_clipboard: ['Using the clipboard…', 'Used the clipboard'], copy_to_clipboard: ['Using the clipboard…', 'Used the clipboard'],
       schedule_task: ['Scheduling…', 'Scheduled a task'], list_tasks: ['Scheduling…', 'Checked tasks'], cancel_task: ['Scheduling…', 'Cancelled a task'],
@@ -375,6 +376,9 @@
   var DRAW = /\b(draw|generate|create|make|design|render|paint|sketch|illustrate|edit|remove|change|turn)\b.*\b(image|picture|photo|logo|illustration|icon|poster|wallpaper|drawing|art|portrait|render)\b|\b(image|picture|photo|logo|illustration|drawing|render) of\b/i;
   // Each kind of request has a default model; "Who handles what" in Settings can change it.
   var TASKS = [
+    { id: 'lead', name: 'Lead assistant', desc: 'Everyday chat and quick questions are answered on this computer. Code, building pages and apps, images, live information and long or complex work go to the models you choose below.', options: ['local'], autoLabel: 'Off', note: 'Needs a local model (Settings, AI models). If no cloud model can answer, the local model answers everything.' },
+    { id: 'localRole', name: 'What the local model keeps', setting: 'localRole', needs: 'local',
+      choices: [{ id: 'auto', label: 'Automatic' }, { id: 'everyday', label: 'Everyday chat' }, { id: 'most', label: 'Everything but images' }] },
     { id: 'image', name: 'Image generation', desc: 'Drawing, logos, illustrations and photo edits', options: ['chatgpt', 'gemini'] },
     { id: 'code', name: 'Code and technical work', desc: 'Programming, debugging, architecture and documents', options: ['claude', 'chatgpt', 'gemini', 'meta', 'local'] },
     { id: 'research', name: 'Research and current events', desc: 'Comparing sources, finding facts and the latest news', options: ['claude', 'chatgpt', 'gemini', 'meta'] },
@@ -384,10 +388,23 @@
   var routing = {};
   try { routing = JSON.parse(localStorage.getItem('ilyra.routing')) || {}; } catch (e) {}
 
-  // Code, builds and long or complex work.
+  // Code, builds and long or complex work: what a small local lead hands to the cloud.
   var CODE_RE = /```|\b(code|coding|bugs?|debug|debugging|refactor|script|scripts|regex|sql|api|apis|stack ?trace|python|javascript|typescript|html|css|react|java|c\+\+|rust|algorithm|compile|database|architecture|endpoint|unit tests?)\b|\b(write|fix|explain|review|optimi[sz]e|convert)\b[^.?!]{0,40}\b(function|class|method|query|program|snippet)\b/i;
   var BUILD_RE = /\b(build|make|create|design|develop|generate|write)\b[^.?!]{0,50}\b(page|site|website|web ?app|app|game|dashboard|ui|landing|calculator|widget|mockup|prototype|extension|bot|program)\b/i;
   var LONG_RE = /\b(analy[sz]e|analysis|in[- ]depth|detailed|thorough|essay|report|proposal|business plan|step[- ]by[- ]step plan|summari[sz]e (this|the following)|pros and cons|research paper|\d{3,} words)\b|\bcompare\b[^.?!]{3,80}\b(and|vs|versus|with)\b/i;
+  // Live information (weather, news, prices) needs a web search, which only the cloud models have.
+  var LIVE_RE = /\b(weather|forecast|rain|snow|temperature|news|headlines|score|stock price|price of|latest|this week|right now|today'?s)\b/i;
+  // Words that point back at earlier work in the chat, so it should stay with the model doing it.
+  var FOLLOWUP_RE = /\b(it|its|it's|that|this|those|these|them|again|instead|also|now|same|above|previous|your (answer|code|version|page)|change|fix|tweak|update|add|remove|rename|make|set|move|center|centre|bigger|smaller|darker|lighter|bolder|try|still|error|broke|broken|works?|working|doesn'?t|didn'?t|won'?t|line \d+)\b/i;
+  function mentionsConnector(text) {
+    var t = String(text).toLowerCase();
+    return /\bconnectors?\b/.test(t) || connectorNames.some(function (n) { return n && t.indexOf(n) !== -1; });
+  }
+  // Work a small local model should hand on: code, builds, pictures, long jobs, connectors.
+  function needsCloud(text, hasImages) {
+    return Boolean(hasImages) || mentionsConnector(text) || DRAW.test(text) || CODE_RE.test(text) || BUILD_RE.test(text) || LONG_RE.test(text) || text.length > 600;
+  }
+
   function classify(text) {
     if (DRAW.test(text)) return 'image';
     var t = text.toLowerCase();
@@ -779,7 +796,7 @@
       });
     }
     var imageProvider = routing.image && routing.image !== 'auto' ? routing.image : undefined;
-    return window.ilyra.chat(model, messages, { web: webOn, thinking: thinkLevel, code: codeOn, imageProvider: imageProvider, requestId: requestId, chatId: currentId, voice: talkMode, summary: chatSummary }).then(function (res) {
+    return window.ilyra.chat(model, messages, { web: webOn, thinking: thinkLevel, code: codeOn, imageProvider: imageProvider, requestId: requestId, chatId: currentId, voice: talkMode, delegates: delegateOrder(), summary: chatSummary }).then(function (res) {
       if (res.cancelled) return { text: res.text || '', offline: false, cancelled: true, modelId: res.model, usage: res.usage };
       return res.error ? { text: res.error, offline: true, outOfCredit: res.outOfCredit } : { text: res.text, offline: false, switchedTo: res.switchedTo, modelId: res.model, usage: res.usage };
     }, function () {
@@ -787,17 +804,51 @@
     });
   }
 
-  // Auto: the model the conversation is already with, else the routed one if it can answer,
-  // else any that can.
+  // ---------- Choosing the model in Auto ----------
   // A model that can answer right now (connected, with credit left).
   function usable(k) { return info[k] && info[k].connected && !info[k].outOfCredit; }
-  // Which model answered last in this chat, if any.
+  // With a local model connected, it leads unless the user turned that off: it answers, and
+  // hands the rest to the cloud. How much it keeps is up to Settings (info.local.strong).
+  function leadActive() { return desktop && usable('local') && (routing.lead || 'local') !== 'auto'; }
+  function cloudModels() { return PROVIDERS.filter(function (k) { return k !== 'local'; }); }
+  // The cloud models the local lead may hand work to: the ones picked in Settings, or every
+  // connected one if they were all left on Automatic.
+  function delegateOrder() {
+    var out = [];
+    ['general', 'code', 'research'].forEach(function (t) {
+      var v = routing[t];
+      if (v && v !== 'auto' && v !== 'local' && out.indexOf(v) < 0) out.push(v);
+    });
+    return out;
+  }
+  // Which model answered last in this chat, and which answered first.
   function chatModel() {
     for (var i = log.length - 1; i >= 0; i--) if (log[i].role === 'assistant' && log[i].model) return log[i].model;
     return null;
   }
+  function firstModel() {
+    for (var i = 0; i < log.length; i++) if (log[i].role === 'assistant' && log[i].model) return log[i].model;
+    return null;
+  }
+  // The cloud model for work the local lead hands on: the routed one, else any that can answer.
+  function cloudFor(text) {
+    var preferred = route(text);
+    if (preferred !== 'local' && usable(preferred)) return preferred;
+    return cloudModels().filter(usable)[0] || null;
+  }
   function pick(text, hasImages) {
     if (!desktop || selected !== 'auto') return selected === 'auto' ? route(text) : selected;
+    if (leadActive()) {
+      // A strong local model keeps everything but pictures; a small one keeps everyday chat.
+      var heavy = info.local.strong ? DRAW.test(text) : needsCloud(text, hasImages);
+      if (heavy || (webOn && LIVE_RE.test(text))) return cloudFor(text) || 'local';
+      // A chat that began on a cloud model stays there for follow-ups to that work ("fix it",
+      // "now add a button"); anything else comes back to the local model.
+      var cur = chatModel();
+      var first = firstModel();
+      if (first && first !== 'local' && cur && cur !== 'local' && usable(cur) && FOLLOWUP_RE.test(text)) return cur;
+      return 'local';
+    }
     // Follow-ups like "nice" or "I meant the weather" stay with the model that has the context.
     var current = chatModel();
     if (current && usable(current) && !hasImages && classify(text) !== 'image') return current;
@@ -838,8 +889,11 @@
     return idx;
   }
   // Long chats are summarized before they crowd out the reply.
-  function needsCompact() {
-    return historyTokens() > 80000 && liveIndexes().length > KEEP_RECENT + 1;
+  // Cloud models have room to spare; a local one has its context size (Settings, AI models),
+  // which must also hold Ilyra's instructions and the reply.
+  function needsCompact(model) {
+    var limit = model === 'local' ? Math.round(((info.local && info.local.context) || 8192) * 0.55) : 80000;
+    return historyTokens() > limit && liveIndexes().length > KEEP_RECENT + 1;
   }
 
   // Replace the older messages (all but the last few) with a summary the model carries on from.
@@ -1595,6 +1649,40 @@
   var settingsSheet = $('settingsSheet');
   function saveRouting() { try { localStorage.setItem('ilyra.routing', JSON.stringify(routing)); } catch (e) {} }
 
+  // A row's buttons: its own choices, or Automatic plus each model it may use.
+  function routeChoices(task) {
+    if (task.choices) return task.choices.map(function (c) { return { id: c.id, label: c.label, needs: task.needs }; });
+    return ['auto'].concat(task.options).map(function (id) {
+      return id === 'auto' ? { id: 'auto', label: task.autoLabel || 'Automatic' } : { id: id, label: MODELS[id].name, needs: id };
+    });
+  }
+  function routeChoice(task) {
+    if (task.setting) return (info.local && info.local.role) || 'auto';
+    if (task.id === 'lead') return routing.lead || (info.local && info.local.connected ? 'local' : 'auto');
+    return routing[task.id] || 'auto';
+  }
+  // Routing lives in this window; a row backed by a setting is kept by the main process.
+  function chooseRoute(task, id) {
+    if (!task.setting) {
+      routing[task.id] = id;
+      saveRouting();
+      renderRouting();
+      return;
+    }
+    var patch = {};
+    patch[task.setting] = id;
+    window.ilyra.settings.set(patch).then(function () { lastCheck = 0; refreshProviders(); });
+  }
+  // What "What the local model keeps" means for the model in use now.
+  function localRoleText() {
+    var p = info.local || {};
+    var keeps = p.strong ? 'everything except making images' : 'everyday chat, and hands code, builds, pictures, live information and long work to the cloud';
+    if (!p.connected) return 'How much the local lead answers itself. Automatic decides by the size of the model.';
+    if (p.role && p.role !== 'auto') return 'The local model keeps ' + keeps + '.';
+    var size = p.params ? p.model + ' has ' + (p.params < 1 ? Math.round(p.params * 1000) + 'M' : p.params + 'B') + ' parameters' : 'Ilyra can\'t tell the size of ' + p.model;
+    return 'Automatic: ' + size + ', so it keeps ' + keeps + '. Models of about ' + p.strongAt + 'B parameters and up keep everything except images.';
+  }
+
   function renderRouting() {
     var list = $('routeList');
     list.textContent = '';
@@ -1611,25 +1699,22 @@
       choices.className = 'route-choices';
       choices.setAttribute('role', 'radiogroup');
       choices.setAttribute('aria-label', task.name);
-      var current = routing[task.id] || 'auto';
-      ['auto'].concat(task.options).forEach(function (id) {
+      var current = routeChoice(task);
+      routeChoices(task).forEach(function (c) {
         var b = document.createElement('button');
         b.type = 'button';
         b.className = 'route-choice';
         b.setAttribute('role', 'radio');
-        b.setAttribute('aria-checked', String(current === id));
-        var connected = id === 'auto' || !desktop || (info[id] && info[id].connected);
+        b.setAttribute('aria-checked', String(current === c.id));
+        var connected = !c.needs || !desktop || (info[c.needs] && info[c.needs].connected);
         b.disabled = !connected;
-        if (!connected) b.title = MODELS[id].name + ' is not connected';
+        if (!connected) b.title = MODELS[c.needs].name + ' is not connected';
         b.innerHTML = icon('<path d="M5 12.5l4.5 4.5L19 7.5"/>');
-        b.appendChild(document.createTextNode(id === 'auto' ? (task.autoLabel || 'Automatic') : MODELS[id].name));
-        b.addEventListener('click', function () {
-          routing[task.id] = id;
-          saveRouting();
-          renderRouting();
-        });
+        b.appendChild(document.createTextNode(c.label));
+        b.addEventListener('click', function () { chooseRoute(task, c.id); });
         choices.appendChild(b);
       });
+      if (task.id === 'localRole') desc.textContent = localRoleText();
       row.appendChild(name);
       row.appendChild(desc);
       row.appendChild(choices);
@@ -1655,6 +1740,7 @@
     if (main) main.scrollTop = 0;
     try { localStorage.setItem('ilyra.settingsPage', name); } catch (e) {}
     if (name === 'briefs') loadBriefs();
+    if (name === 'routing') renderRouting();
   }
   function openSettings(page) {
     lastCheck = 0; refreshProviders(); renderRouting(); loadSettingsExtras(); loadConnectors();
@@ -1963,6 +2049,8 @@
     talkButton.setAttribute('aria-pressed', String(on));
     if (on) {
       stopTalking(true);
+      // Load the local model while the user speaks, so the first reply doesn't wait for it.
+      if (desktop && usable('local')) window.ilyra.warmLocal();
       talkListen();
     } else {
       talkStopListening();
@@ -2365,6 +2453,37 @@
     li.querySelector('.remove').hidden = !p.connected;
     var find = li.querySelector('.find');
     if (find) find.hidden = p.connected;
+    var context = li.querySelector('.context-select');
+    if (context && p.context) context.value = String(p.context);
+  }
+
+  // How much of the chat the local model can hold at once. Ollama is given this size; other
+  // servers set it when they load the model, so the two should match.
+  var CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072];
+  function contextPicker() {
+    var row = document.createElement('div');
+    row.className = 'provider-row-extra';
+    var label = document.createElement('label');
+    label.textContent = 'Context size';
+    var sel = document.createElement('select');
+    sel.className = 'context-select';
+    sel.setAttribute('aria-label', 'Context size');
+    CONTEXT_SIZES.forEach(function (n) {
+      var opt = document.createElement('option');
+      opt.value = String(n);
+      opt.textContent = (n / 1024) + 'k tokens' + (n === 8192 ? ' (common)' : '');
+      sel.appendChild(opt);
+    });
+    var note = document.createElement('span');
+    note.textContent = 'Bigger holds longer chats but needs more memory. Ollama uses this; for other servers, load the model with the same size.';
+    sel.disabled = !desktop;
+    sel.addEventListener('change', function () {
+      window.ilyra.settings.set({ localContext: Number(sel.value) }).then(function () { lastCheck = 0; refreshProviders(); });
+    });
+    label.appendChild(sel);
+    row.appendChild(label);
+    row.appendChild(note);
+    return row;
   }
 
   // Fills in the address of a model server already running on this computer.
@@ -2416,6 +2535,7 @@
         find.textContent = 'Find it';
         find.addEventListener('click', function () { findLocalServer(li, false); });
         li.querySelector('.head-links').insertBefore(find, li.querySelector('.get'));
+        li.appendChild(contextPicker());
       }
 
       if (!desktop) {
@@ -2614,6 +2734,7 @@
 
   // ---------- Connectors (outside services over MCP) ----------
   function renderConnectors(list) {
+    connectorNames = list.map(function (c) { return String(c.name || '').toLowerCase(); });
     var ul = $('connectorList');
     ul.textContent = '';
     $('connectorsCard').hidden = !list.length;

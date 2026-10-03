@@ -42,14 +42,17 @@ const collect = () => { const c = { text: '', thinking: '' }; c.onText = (t) => 
 
   // ---------- Ollama ----------
   const ollama = await fakeServer({
-    'GET /api/tags': () => ({ json: { models: [{ name: 'llama3.2:3b', size: 2e9 }, { name: 'nomic-embed-text', size: 3e8 }] } }),
+    'GET /api/tags': () => ({ json: { models: [{ name: 'llama3.2:3b', size: 2e9, details: { parameter_size: '3.2B' } }, { name: 'nomic-embed-text', size: 3e8 }] } }),
     'POST /api/show': () => ({ json: { capabilities: ['completion', 'tools'] } }),
+    'POST /api/generate': () => ({ json: { done: true } }),
     'POST /api/chat': (_b, seen) => (seen.filter((s) => s.route === 'POST /api/chat').length === 1
       ? { stream: [JSON.stringify({ message: { tool_calls: [{ function: { name: 'read_file', arguments: { path: 'a.txt' } } }] } }), JSON.stringify({ done: true, prompt_eval_count: 10, eval_count: 2 })] }
       : { stream: [JSON.stringify({ message: { content: 'It says hi.' } }), JSON.stringify({ done: true, prompt_eval_count: 20, eval_count: 4 })] })
   });
   ok('Ollama: chat models only, embedders left out', (await local.models(ollama.address)).join() === 'llama3.2:3b');
   ok('Ollama: sizes shown in the list', (await local.listModels(ollama.address))[0].label.includes('2.0 GB'));
+  ok('Ollama: parameter count from the server', local.sizeOf(ollama.address, 'llama3.2:3b') === 3.2);
+  ok('a size can be read from a model name', local.sizeOf('http://elsewhere', 'Meta-Llama-3.1-70B-Instruct') === 70 && local.sizeOf('http://elsewhere', 'mistral-small') === null);
 
   const native = local.adapter.init([{ role: 'user', content: 'Read a.txt', images: [{ mime: 'image/png', data: 'AAAA' }] }]);
   let c = collect();
@@ -66,6 +69,11 @@ const collect = () => { const c = { text: '', thinking: '' }; c.onText = (t) => 
   c = collect();
   step = await local.adapter.step({ key: ollama.address, model: 'llama3.2:3b', system: 'sys', native, tools: [TOOL], onText: c.onText });
   ok('Ollama: the answer streams after the tool ran', c.text === 'It says hi.' && step.calls.length === 0);
+  local.configure({ context: 32768 });
+  await local.warm(ollama.address, 'llama3.2:3b');
+  const warmed = ollama.seen.find((x) => x.route === 'POST /api/generate');
+  ok('Ollama: warming loads the model with the context size from Settings', warmed && warmed.body.model === 'llama3.2:3b' && warmed.body.options.num_ctx === 32768);
+  local.configure({ context: 8192 });
   ollama.server.close();
 
   // ---------- OpenAI-compatible (LM Studio, llama.cpp, ...) ----------
@@ -100,6 +108,31 @@ const collect = () => { const c = { text: '', thinking: '' }; c.onText = (t) => 
   local.adapter.append(nat, step, [{ id: 'c1', name: 'read_file', output: 'x' }]);
   ok('compatible: tool results use tool_call_id', nat[nat.length - 1].tool_call_id === 'c1' && nat[nat.length - 2].tool_calls[0].function.arguments.includes('b.txt'));
   toolServer.server.close();
+
+  // ---------- A tool call written as text ----------
+  const texty = await fakeServer({
+    'GET /api/tags': () => ({ json: { models: [{ name: 'tiny:1b' }] } }),
+    'POST /api/show': () => ({ json: { capabilities: ['completion', 'tools'] } }),
+    'POST /api/chat': () => ({ stream: [JSON.stringify({ message: { content: ' {"name": "read_file", ' } }), JSON.stringify({ message: { content: '"parameters": {"path": "c.txt"}}' } }), JSON.stringify({ done: true })] })
+  });
+  await local.models(texty.address);
+  c = collect();
+  step = await local.adapter.step({ key: texty.address, model: 'tiny:1b', system: 'sys', native: local.adapter.init([{ role: 'user', content: 'read c.txt' }]), tools: [TOOL], onText: c.onText });
+  ok('a call written as text becomes the call, and is not shown', step.calls[0].name === 'read_file' && step.calls[0].args.path === 'c.txt' && c.text === '' && step.text === '');
+  c = collect();
+  step = await local.adapter.step({ key: texty.address, model: 'tiny:1b', system: 'sys', native: local.adapter.init([{ role: 'user', content: 'hi' }]), tools: [], onText: c.onText });
+  ok('without tools offered, the same text is just text', step.calls.length === 0 && /"name": "read_file"/.test(c.text));
+  texty.server.close();
+
+  const plainJson = await fakeServer({
+    'GET /v1/models': () => ({ json: { data: [{ id: 'm' }] } }),
+    'POST /v1/chat/completions': () => ({ stream: [`data: ${JSON.stringify({ choices: [{ delta: { content: '{"colour": "blue"}' } }] })}`, 'data: [DONE]'] })
+  });
+  await local.models(plainJson.address);
+  c = collect();
+  step = await local.adapter.step({ key: plainJson.address, model: 'm', system: 'sys', native: local.adapter.init([{ role: 'user', content: 'json please' }]), tools: [TOOL], onText: c.onText });
+  ok('other JSON answers are shown as they are', step.calls.length === 0 && c.text === '{"colour": "blue"}');
+  plainJson.server.close();
 
   // ---------- Errors ----------
   await assert.rejects(local.models('http://127.0.0.1:9'), /can't reach a model server/);

@@ -151,11 +151,27 @@ const tasks = {
   list() { const t = readEncrypted(path.join(dataDir(), 'tasks.enc'), []); return Array.isArray(t) ? t : []; },
   save(list) { writeEncrypted(path.join(dataDir(), 'tasks.enc'), list); }
 };
-const DEFAULT_SETTINGS = { autoMemory: false, background: false, startAtLogin: false, location: false };
+// Context sizes a local model can be given, in tokens. 8k is a common size that fits beside most
+// models people run at home; bigger models and graphics cards can take more.
+const LOCAL_CONTEXT_SIZES = [4096, 8192, 16384, 32768, 65536, 131072];
+// What the local model answers when it leads: decided by its size, everyday chat only, or
+// everything except making images.
+const LOCAL_ROLES = ['auto', 'everyday', 'most'];
+const DEFAULT_SETTINGS = { autoMemory: false, background: false, startAtLogin: false, location: false, localContext: 8192, localRole: 'auto' };
+// Each setting's check; anything not listed is on or off. An invalid value is ignored.
+const SETTING_CHECKS = {
+  localContext: (v) => (LOCAL_CONTEXT_SIZES.includes(Number(v)) ? Number(v) : undefined),
+  localRole: (v) => (LOCAL_ROLES.includes(v) ? v : undefined)
+};
 const settings = {
   get() { return Object.assign({}, DEFAULT_SETTINGS, readJson('settings.json', {})); },
   set(patch) {
-    const next = Object.assign(settings.get(), ...Object.keys(patch || {}).filter((k) => k in DEFAULT_SETTINGS).map((k) => ({ [k]: Boolean(patch[k]) })));
+    const next = settings.get();
+    for (const k of Object.keys(patch || {})) {
+      if (!(k in DEFAULT_SETTINGS)) continue;
+      const value = (SETTING_CHECKS[k] || Boolean)(patch[k]);
+      if (value !== undefined) next[k] = value;
+    }
     writeJson('settings.json', next);
     return next;
   }

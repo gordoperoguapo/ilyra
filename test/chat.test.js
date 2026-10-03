@@ -81,8 +81,31 @@ PROVIDERS.claude.adapter.step = async ({ system, native, onText }) => {
   const localRes = await handlers.chat(event, 'local', [{ role: 'user', content: 'hi' }], { requestId: 'rl', chatId: 'cl', web: true, code: true });
   assert.ok(!localRes.error && localAsk.key === 'http://localhost:11434', 'a local reply goes to that server');
   assert.ok(!localAsk.web && !localAsk.code && !/You can search the web/.test(localAsk.system), 'a local model is not told it can search the web or run code');
-  assert.ok(!localAsk.tools.some((t) => t.name === 'save_memory'), 'a local model gets the memory tools only when memory comes up');
+  assert.ok(!localAsk.tools.some((t) => ['save_memory', 'write_file', 'schedule_task', 'read_file', 'search_chats'].includes(t.name)), 'a small local model gets tools only when the message is about them');
+
+  // ---- how much the local model keeps: by its size, or as Settings say
+  assert.ok(/Never make up facts/.test(localAsk.system) && !/live preview panel/.test(localAsk.system), 'a small local model gets the short prompt');
+  assert.ok(localAsk.tools.some((t) => t.name === 'ask_model') && /ask_model: claude/.test(localAsk.system), 'it can hand work to the connected cloud model');
+  const small = (await handlers['providers:list'](event)).find((p) => p.id === 'local');
+  assert.ok(small.params === 3 && !small.strong && small.context === 8192 && small.role === 'auto', 'a 3B model keeps everyday chat, with 8k of context by default');
+  await handlers['settings:set'](event, { localRole: 'most', localContext: 12345 });
+  const strong = (await handlers['providers:list'](event)).find((p) => p.id === 'local');
+  assert.ok(strong.strong && strong.context === 8192, 'the role can be raised, and an unknown context size is ignored');
+  await handlers.chat(event, 'local', [{ role: 'user', content: 'hi' }], { requestId: 'rl2', chatId: 'cl', delegates: ['gemini'] });
+  assert.ok(/live preview panel/.test(localAsk.system) && !/Never make up facts/.test(localAsk.system), 'a strong local model gets the full prompt');
+  assert.ok(!localAsk.tools.some((t) => t.name === 'ask_model'), 'only the cloud models chosen in Settings are asked (Gemini is not connected)');
+  await handlers['settings:set'](event, { localRole: 'auto', localContext: 16384 });
+  assert.strictEqual((await handlers['providers:list'](event)).find((p) => p.id === 'local').context, 16384, 'the context size can be changed');
   PROVIDERS.local.adapter.step = realStep;
+
+  // ---- ask_model: once local data was read, the question is shown in full before it leaves
+  const tools = require('../electron/tools');
+  let shown = null;
+  const reading = { localDataRead: true, confirm: async (c) => { shown = c; return false; }, askModel: async () => ({ text: 'x', name: 'Claude', model: 'm' }) };
+  await assert.rejects(tools.runTool('ask_model', { provider: 'claude', question: 'what does notes.txt say: the secret plan' }, reading), /declined/);
+  assert.ok(shown && shown.detail.includes('the secret plan'), 'the question is shown to the user');
+  const answered = await tools.runTool('ask_model', { provider: 'claude', question: 'hi' }, { askModel: async () => ({ text: 'Hello', name: 'Claude', model: 'm' }) });
+  assert.ok(/Claude answered:\n\nHello/.test(answered.output), 'without local data read, it just asks');
   await handlers['providers:remove'](event, 'local');
   sent.length = 0;
 

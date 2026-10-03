@@ -201,13 +201,42 @@ function notify(title, body, chatId) {
 
 // ---------- Providers ----------
 
+// How much the local model takes on when it leads (Settings, Who handles what). On Automatic, a
+// model of about 20B parameters or more keeps the heavy work too; a smaller one, or one whose
+// size is unknown, keeps everyday chat and hands the rest to the cloud.
+const STRONG_LOCAL_PARAMS = 20;
+function localStrong() {
+  const role = store.settings.get().localRole;
+  if (role !== 'auto') return role === 'most';
+  const size = PROVIDERS.local.sizeOf(keystore.getKey('local'), modelFor('local'));
+  return size !== null && size >= STRONG_LOCAL_PARAMS;
+}
+
 function describe(id) {
   const p = PROVIDERS[id];
   const s = keystore.summary(id);
-  return { id, name: p.name, local: Boolean(p.local), connected: s.connected, outOfCredit: outOfCredit.has(id), hint: s.hint, model: s.model || p.defaultModel, defaultModel: p.defaultModel, pinned: s.pinned };
+  const out = { id, name: p.name, local: Boolean(p.local), connected: s.connected, outOfCredit: outOfCredit.has(id), hint: s.hint, model: s.model || p.defaultModel, defaultModel: p.defaultModel, pinned: s.pinned };
+  if (p.local) {
+    const { localContext, localRole } = store.settings.get();
+    Object.assign(out, {
+      params: s.connected ? p.sizeOf(keystore.getKey(id), out.model) : null,
+      strong: s.connected && localStrong(),
+      strongAt: STRONG_LOCAL_PARAMS,
+      context: localContext,
+      role: localRole
+    });
+  }
+  return out;
 }
 
-ipcMain.handle('providers:list', () => PROVIDER_IDS.map(describe));
+ipcMain.handle('providers:list', async () => {
+  // The local model's size comes from its server: ask once, so routing knows it.
+  const address = keystore.getKey('local');
+  if (address && PROVIDERS.local.sizeOf(address, modelFor('local')) === null) {
+    try { await PROVIDERS.local.models(address); } catch { /* not running right now */ }
+  }
+  return PROVIDER_IDS.map(describe);
+});
 
 // Saving a key also checks it, by listing the provider's models. For local models the "key" is
 // the server's address.
@@ -269,6 +298,12 @@ ipcMain.handle('providers:remove', (_e, id) => {
 // Looks for a model server already running on this computer, to fill in its address.
 ipcMain.handle('providers:findLocal', async () => {
   try { return { server: await PROVIDERS.local.find() }; } catch (err) { return fail(err); }
+});
+
+// Talk mode is starting: load the local model now so the first reply doesn't wait for it.
+ipcMain.handle('local:warm', async () => {
+  const address = keystore.getKey('local');
+  if (address) try { await PROVIDERS.local.warm(address, modelFor('local')); } catch { /* best effort */ }
 });
 
 ipcMain.handle('providers:keyPage', (_e, id) => {
@@ -364,6 +399,42 @@ function makeImageGenerator({ id, preferred, inputImages, signal, send }) {
   };
 }
 
+// A local model can hand work to the cloud models the user picked in Settings (every connected
+// one if they left them on Automatic). The other model sees only the question the local one
+// writes, and its answer comes back as text. The one asked for goes first, then the others, so
+// one failing account doesn't sink the answer.
+function makeAskModel({ delegates, options, signal, send }) {
+  if (!delegates.length) return null;
+  return async ({ provider, question }) => {
+    const order = [delegates.includes(provider) ? provider : delegates[0]].concat(delegates.filter((k) => k !== provider));
+    let lastErr = null;
+    for (const use of order) {
+      if (outOfCredit.has(use)) continue;
+      const useModel = modelFor(use);
+      send('chat:status', `Asking ${PROVIDERS[use].name}…`);
+      try {
+        const text = await runAgent({
+          id: use, key: keystore.getKey(use), model: useModel, messages: [{ role: 'user', content: question }],
+          roots: [], confirm: async () => false, useTools: false, signal, retries: 0,
+          web: options.web !== false, code: options.code !== false,
+          thinking: THINKING_LEVELS.includes(options.thinking) ? options.thinking : 'medium',
+          onSources: (list) => send('chat:sources', list),
+          onRun: (run) => send('chat:code', run),
+          onImage: (images) => send('chat:image', images),
+          onUsage: (u) => usage.record(use, u.input, u.output)
+        });
+        return { text, name: PROVIDERS[use].name, model: useModel };
+      } catch (err) {
+        if (signal.aborted) throw err;
+        logFailure(use, useModel, err);
+        if (isOutOfCredit(err)) outOfCredit.add(use);
+        lastErr = new Error(`${PROVIDERS[use].name} could not answer: ${friendlyError(err)}`);
+      }
+    }
+    throw lastErr || new Error('None of your chosen models can answer right now.');
+  };
+}
+
 // An unmistakable "make me a picture" request must call the image tool rather than be answered
 // with SVG or code, so the first step is forced to use it.
 const ASKED_FOR_IMAGE = /\b(draw|generate|create|make|paint|illustrate|render|design)\b[^.?!]{0,40}\b(image|picture|photo|logo|illustration|icon|poster|wallpaper|drawing|portrait)\b|\b(image|picture|photo|drawing|illustration|logo) of\b/i;
@@ -413,6 +484,10 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
 
   const confirm = makeConfirm({ win: BrowserWindow.fromWebContents(e.sender), chatId, signal, send });
   const generateImage = makeImageGenerator({ id, preferred: options.imageProvider, inputImages: (lastUser && lastUser.images) || [], signal, send });
+  const cloud = PROVIDER_IDS.filter((k) => !PROVIDERS[k].local);
+  const chosen = Array.isArray(options.delegates) && options.delegates.length ? options.delegates.filter((k) => cloud.includes(k)) : cloud;
+  const delegates = p.local ? chosen.filter((k) => keystore.getKey(k) && !outOfCredit.has(k)) : [];
+  const askModel = makeAskModel({ delegates, options, signal, send });
   const forceTool = generateImage && ASKED_FOR_IMAGE.test(lastText) && !ASKED_FOR_MARKUP.test(lastText) ? 'generate_image' : null;
   const memoryNote = lastText ? await learnFrom(lastText, { confirm, signal, send }) : '';
 
@@ -433,6 +508,9 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
     code: options.code !== false && p.canRunCode !== false,
     thinking: options.voice ? 'off' : THINKING_LEVELS.includes(options.thinking) ? options.thinking : 'medium',
     voice: Boolean(options.voice),
+    // A small local model gets a shorter, plainer prompt, and can ask the cloud for help.
+    lean: Boolean(p.local) && !localStrong(),
+    askModel, askNames: delegates,
     memoryNote,
     briefs: store.briefs.get().trim(),
     here,
@@ -707,6 +785,7 @@ ipcMain.handle('tasks:remove', (_e, id) => scheduler.remove(String(id)));
 ipcMain.handle('settings:get', () => store.settings.get());
 ipcMain.handle('settings:set', (_e, patch) => {
   const next = store.settings.set(patch);
+  PROVIDERS.local.configure({ context: next.localContext });
   if (patch && 'location' in patch) { if (next.location) location.refresh({ force: true }); else location.forget(); }
   applyBackground();
   if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: next.startAtLogin, args: next.startAtLogin ? ['--hidden'] : [] });
@@ -767,6 +846,7 @@ if (!app.requestSingleInstanceLock()) {
     app.setAccessibilitySupportEnabled(true);
     // Windows needs this for notifications.
     app.setAppUserModelId('app.ilyra.hub');
+    PROVIDERS.local.configure({ context: store.settings.get().localContext });
     // The only permission Ilyra grants is the microphone, for talk mode. Previews get nothing.
     session.defaultSession.setPermissionRequestHandler((_wc, permission, done, details) =>
       done(permission === 'media' && !String((details && details.requestingUrl) || '').startsWith(`${ARTIFACT_SCHEME}:`)));
