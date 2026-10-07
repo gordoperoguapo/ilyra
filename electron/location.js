@@ -25,7 +25,7 @@ function init(opts) {
   try { if (file) cached = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { cached = null; }
 }
 
-// "Plano, Texas" for the US, "Lyon, France" elsewhere.
+// "Austin, Texas" for the US, "Lyon, France" elsewhere.
 function label(l) {
   if (!l) return '';
   return [l.city, l.countryCode === 'US' || l.countryCode === 'CA' ? l.region : l.country].filter(Boolean).join(', ');

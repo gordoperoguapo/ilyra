@@ -46,7 +46,7 @@ function extract(text) {
     if ((m = /\b[Ii] (?:live|reside|stay) in ([A-Z][A-Za-z.'-]*(?: [A-Z][A-Za-z.'-]*){0,2}(?:, [A-Z][A-Za-z.]*(?: [A-Z][A-Za-z.]*)?)?)/.exec(sentence))) add('Lives in', m[1]);
     if ((m = new RegExp(`\\bi work (?:at|for) (${SAFE})(?=\\s+(?:as|and|but|because|so)\\b|[.,!;]|$)`, 'i').exec(sentence))) add('Works at', m[1]);
     if ((m = new RegExp(`\\bi work as (?:a|an|the)? ?(${SAFE})(?=\\s+(?:at|for|and|but|because|so)\\b|[.,!;]|$)`, 'i').exec(sentence))) add('Job', m[1]);
-    // "I am a sales rep for Gordon Food Service": a job at a named place.
+    // "I am a sales rep for Acme Foods": a job at a named place.
     if ((m = new RegExp(`\\bi(?:'m| am) (?:a|an) (?!(?:bit|little|lot|big|huge|fan|bit of)\\b)(${SAFE}) (?:for|at|with) ([A-Z][A-Za-z0-9&'.-]*(?: [A-Z&][A-Za-z0-9&'.-]*){0,4})`, 'i').exec(sentence))) { add('Job', m[1]); add('Works at', m[2]); }
     // How many children, dogs or cats; and the kids' names.
     let counted = false;
