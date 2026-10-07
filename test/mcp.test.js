@@ -83,5 +83,20 @@ const server = http.createServer(async (req, res) => {
   await runAgent({ id: 'claude', key: 'k', model: 'm', messages: [{ role: 'user', content: 'hi' }], roots: [], confirm: yes, connectors, useTools: false, onText: () => {} });
   assert.ok(!offered.some((n) => n.startsWith('mcp_')), 'a request with tools off gets no connector tools');
   await mgr.closeAll(); server.close();
+
+  // Connector schemas are cleaned so Ollama accepts them (it refuses the whole request otherwise).
+  const { cleanSchema } = require('../electron/mcp');
+  assert.deepStrictEqual(cleanSchema({ type: 'object' }), { type: 'object', properties: {} }, 'a no-argument tool gets properties');
+  assert.deepStrictEqual(cleanSchema(undefined), { type: 'object', properties: {} });
+  assert.deepStrictEqual(cleanSchema({ type: 'object', properties: null }).properties, {});
+  assert.deepStrictEqual(cleanSchema({ type: 'object', properties: [] }).properties, {});
+  assert.deepStrictEqual(cleanSchema({ type: 'object', properties: { a: true } }).properties, { a: {} }, 'a boolean schema becomes an open one');
+  const deep = cleanSchema({ type: 'object', properties: { opts: { type: 'object', properties: null }, list: { type: 'array', items: { type: 'object' } }, x: { anyOf: [{ type: 'object' }, { type: 'null' }] } }, required: 'opts' });
+  assert.deepStrictEqual(deep.properties.opts.properties, {});
+  assert.deepStrictEqual(deep.properties.list.items, { type: 'object', properties: {} });
+  assert.deepStrictEqual(deep.properties.x.anyOf[0], { type: 'object', properties: {} });
+  assert.ok(!('required' in deep), 'a malformed required list is dropped');
+  const kept = { type: 'object', properties: { q: { type: 'string', description: 'Query', enum: ['a', 'b'] } }, required: ['q'] };
+  assert.deepStrictEqual(cleanSchema(kept), kept, 'a good schema is unchanged');
   console.log('mcp tests passed');
 })().catch((e) => { console.error(e); process.exit(1); });

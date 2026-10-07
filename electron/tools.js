@@ -171,7 +171,7 @@ const DEFINITIONS = [
   {
     name: 'schedule_task',
     description: 'Set a reminder, or a task Ilyra runs on its own later (for example a morning news briefing). For a one-time task give "when" as a local date and time like 2026-10-01T15:30. For a repeating task give repeat (daily, weekdays or weekly) plus time like 08:30 (and day for weekly). Give "prompt" only when Ilyra should run a request on its own; leave it out for a plain reminder. Use the current date and time from the instructions.',
-    parameters: { type: 'object', properties: { title: str('Short name, shown in the notification'), when: str('Local date and time for a one-time task'), repeat: str('daily, weekdays or weekly'), time: str('24-hour HH:MM for repeating tasks'), day: str('mon to sun, for weekly'), prompt: str('What Ilyra should do and report, for briefings') }, required: ['title'] }
+    parameters: { type: 'object', properties: { title: str('Short name, shown in the notification'), when: str('Local date and time for a one-time task'), repeat: str('daily, weekdays or weekly'), time: str('24-hour HH:MM for repeating tasks'), day: str('mon to sun, for weekly'), prompt: str('What Ilyra should do and report, for briefings'), background: { type: 'boolean', description: 'true to run the prompt as a full background task each time (plans, uses tools and files, checks its work), for jobs bigger than a briefing' } }, required: ['title'] }
   },
   {
     name: 'list_tasks',
@@ -331,15 +331,15 @@ const RUNNERS = {
   async schedule_task(args, ctx) {
     if (args.prompt) {
       const when = args.repeat ? `${args.repeat}${args.day ? ' ' + args.day : ''} at ${args.time}` : args.when;
-      const ok = await ctx.confirm({ kind: 'schedule', title: 'Ilyra wants to run a task on its own', path: String(args.title || '').slice(0, 80), detail: `When: ${when}\n\nIlyra will send this request to an AI model by itself each time, with web search but no file access:\n\n${visible(String(args.prompt).slice(0, 1000))}` });
+      const ok = await ctx.confirm({ kind: 'schedule', title: 'Ilyra wants to run a task on its own', path: String(args.title || '').slice(0, 80), detail: `When: ${when}\n\n${args.background ? 'Ilyra will work on this as a background task each time (it plans, uses its tools and its own task folder, and checks its work):' : 'Ilyra will send this request to an AI model by itself each time, with web search but no file access:'}\n\n${visible(String(args.prompt).slice(0, 1000))}` });
       if (!ok) throw new Error('The user declined to schedule that.');
     }
-    const task = ctx.scheduler.add({ title: args.title, prompt: args.prompt, when: args.when, repeat: args.repeat, time: args.time, day: args.day });
+    const task = ctx.scheduler.add({ title: args.title, prompt: args.prompt, when: args.when, repeat: args.repeat, time: args.time, day: args.day, background: Boolean(args.background && args.prompt) });
     return { summary: `scheduled "${task.title}"`, output: `Scheduled "${task.title}" (id ${task.id}) for ${new Date(task.nextRun).toLocaleString()}${task.repeat ? `, then ${task.repeat}` : ''}. Ilyra must be running at that time.` };
   },
   async list_tasks(_args, ctx) {
     const rows = ctx.scheduler.list();
-    return { summary: 'listed scheduled tasks', output: rows.length ? rows.map((t) => `${t.id} | ${t.title} | next ${new Date(t.nextRun).toLocaleString()}${t.repeat ? ' | ' + t.repeat : ''}${t.prompt ? ' | runs a request' : ' | reminder'}`).join('\n') : 'No scheduled tasks.' };
+    return { summary: 'listed scheduled tasks', output: rows.length ? rows.map((t) => `${t.id} | ${t.title} | next ${new Date(t.nextRun).toLocaleString()}${t.repeat ? ' | ' + t.repeat : ''}${t.background ? ' | background task' : t.prompt ? ' | runs a request' : ' | reminder'}`).join('\n') : 'No scheduled tasks.' };
   },
   async cancel_task({ id }, ctx) {
     if (!ctx.scheduler.remove(String(id))) throw new Error('No task with that id.');
@@ -512,4 +512,12 @@ async function runTool(name, args, ctx) {
   return { summary: res.summary, output: clip(String(res.output)), sources: res.sources };
 }
 
-module.exports = { DEFINITIONS, runTool, allowed, sensitive, pruneBackups };
+// The extras add their own tools (see extras/tools.js). A tool that reads
+// the user's own data is listed in readers, so later steps treat the reply as having read it.
+function extend({ definitions = [], runners = {}, readers = [] }) {
+  DEFINITIONS.push(...definitions);
+  Object.assign(RUNNERS, runners);
+  for (const name of readers) LOCAL_READERS.add(name);
+}
+
+module.exports = { DEFINITIONS, runTool, allowed, sensitive, pruneBackups, extend };

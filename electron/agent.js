@@ -3,7 +3,7 @@
 const { PROVIDERS } = require('./providers');
 const tools = require('./tools');
 
-const MAX_STEPS = 12;
+const MAX_STEPS = 40; // room to finish a real task
 const CLIPBOARD_WORDS = /\b(clipboard|copied|copy|copying|paste|pasted)\b/i;
 const MEMORY_WORDS = /\b(remember|forget|memory|memori[sz]e|keep in mind)\b/i;
 const TASK_WORDS = /\b(remind|reminder|schedule[ds]?|tasks?|every (day|morning|evening|night|week|weekday|month)|daily|weekly|alarm|timer)\b/i;
@@ -133,6 +133,8 @@ function systemPrompt(p) {
 //         useTools, web, fetch, code, generateImage, forceTool, memory, clipboard, scheduler,
 //         makePdf, downloads, fetchPage, connectors, here, hereNote, briefs, summary, usageNote,
 //         memoryNote, systemOverride, lean, askModel, askNames,
+//         allTools, extraSystem, maxSteps, task (background tasks),
+//         extras ({ gate, prompt } from extras/index.js),
 //         onText, onThinking, onTool, onImage, onRun, onSources, onUsage }
 async function runAgent(opts) {
   const adapter = PROVIDERS[opts.id].adapter;
@@ -161,8 +163,11 @@ async function runAgent(opts) {
   for (const name of FILE_TOOLS) gate[name] = Boolean(opts.roots && opts.roots.length);
   // A local model gets fewer tools (see LOCAL_TOOL_WORDS). Without the memory tools, Ilyra still
   // learns what the user shares (see profile.js).
-  const narrowed = PROVIDERS[opts.id].local ? Object.assign({}, LOCAL_TOOL_WORDS, opts.lean ? LEAN_TOOL_WORDS : {}) : {};
+  // A background task (allTools) needs its tools whatever its wording.
+  const narrowed = PROVIDERS[opts.id].local && !opts.allTools ? Object.assign({}, LOCAL_TOOL_WORDS, opts.lean ? LEAN_TOOL_WORDS : {}) : {};
   for (const [name, words] of Object.entries(narrowed)) gate[name] = gate[name] !== false && words.test(lastText);
+  // Which of the extras' tools this request may use (see extras/index.js).
+  if (opts.extras) Object.assign(gate, opts.extras.gate);
   const connectors = useTools && opts.connectors && opts.connectors.defs.length ? opts.connectors : null;
   const defs = useTools ? tools.DEFINITIONS.filter((d) => gate[d.name] !== false).concat(connectors ? connectors.defs : []) : [];
 
@@ -190,15 +195,20 @@ async function runAgent(opts) {
   });
   // Whatever model answers is told what was just saved, so it never claims otherwise.
   if (opts.memoryNote) system += `\n\nWhat just happened with memory (tell the user in your own words, in one short sentence): ${opts.memoryNote}`;
+  // What the extras looked up, and how to use those of their tools offered.
+  if (opts.extras) system += opts.extras.prompt(defs.map((d) => d.name));
   // A caller with its own job (writing a summary) supplies the whole system prompt.
   if (opts.systemOverride) system = String(opts.systemOverride);
   if (opts.voice) system += `\n${VOICE}`;
+  // A background task's own instructions (see extras/tasks.js).
+  if (opts.extraSystem) system += `\n\n${opts.extraSystem}`;
 
   const native = adapter.init(opts.messages);
   const ctx = {
     roots: opts.roots || [], confirm: opts.confirm, generateImage: opts.generateImage, onImage: opts.onImage || (() => {}),
     memory: opts.memory, clipboard: opts.clipboard, scheduler: opts.scheduler, fetchPage: opts.fetchPage,
-    makePdf: opts.makePdf, downloads: opts.downloads, here: opts.here, askModel: opts.askModel
+    makePdf: opts.makePdf, downloads: opts.downloads, here: opts.here, askModel: opts.askModel,
+    task: opts.task || null // the background task this run works on
   };
   let full = '';
   const sources = [];
@@ -211,8 +221,13 @@ async function runAgent(opts) {
   const stopped = () => Object.assign(new Error('Stopped.'), { name: 'AbortError', aborted: true });
   const aborted = () => opts.signal && opts.signal.aborted;
 
-  for (let i = 0; i < MAX_STEPS; i++) {
+  // For the speed log (onStep): how much the model is handed each step, and how long it takes.
+  const sizes = { systemChars: system.length, toolChars: JSON.stringify(defs).length, tools: defs.length, connectorTools: connectors ? connectors.defs.length : 0 };
+
+  const maxSteps = Number.isInteger(opts.maxSteps) && opts.maxSteps > 0 ? opts.maxSteps : MAX_STEPS;
+  for (let i = 0; i < maxSteps; i++) {
     if (aborted()) throw stopped();
+    const stepStart = Date.now();
     const step = await adapter.step({
       key: opts.key, model: opts.model, system, native, tools: defs,
       web: Boolean(opts.web), code: Boolean(opts.code), thinking: opts.thinking,
@@ -221,6 +236,7 @@ async function runAgent(opts) {
       onText: say, onThinking: opts.onThinking
     });
     if (step.usage) emit('onUsage', step.usage);
+    emit('onStep', Object.assign({ ms: Date.now() - stepStart, timing: (step.usage && step.usage.timing) || null, calls: step.calls.length }, sizes));
     for (const q of step.searches || []) emit('onTool', { name: 'web_search', summary: `searched the web for "${q}"`, isError: false });
     for (const r of step.runs || []) emit('onRun', r);
     if (step.images && step.images.length) emit('onImage', step.images);
@@ -235,6 +251,7 @@ async function runAgent(opts) {
       let output;
       let summary;
       let isError = false;
+      const began = Date.now();
       try {
         if (gate[call.name] === false) throw new Error('That tool is not available for this request.');
         const res = viaConnector
@@ -249,7 +266,7 @@ async function runAgent(opts) {
         summary = `${call.name} failed: ${output}`;
         isError = true;
       }
-      emit('onTool', { name: viaConnector ? 'connector' : call.name, summary, isError });
+      emit('onTool', { name: viaConnector ? 'connector' : call.name, summary, isError, tool: call.name, ms: Date.now() - began });
       results.push({ id: call.id, name: call.name, hasId: call.hasId, output, isError });
     }
     if (aborted()) throw stopped();

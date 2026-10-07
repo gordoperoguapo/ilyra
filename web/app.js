@@ -57,6 +57,8 @@
   var localDataTouched = false;
   // Tool events that never expose the user's own files, chats or clipboard.
   var OUTSIDE_TOOLS = { connector: 1, web_search: 1, fetch_page: 1, generate_image: 1, ask_model: 1, memory: 1, note: 1 };
+  // Sandboxed code reads none of the user's data.
+  OUTSIDE_TOOLS.run_code = 1;
   var connectorNames = []; // lower case, for routing messages that mention one
 
   // Preferences kept between sessions
@@ -99,6 +101,8 @@
       schedule_task: ['Scheduling…', 'Scheduled a task'], list_tasks: ['Scheduling…', 'Checked tasks'], cancel_task: ['Scheduling…', 'Cancelled a task'],
       connector: ['Using a connector…', 'Used a connector']
     };
+    // The labels for the extras' tools (see extras.js).
+    if (window.IlyraExtras) Object.assign(map, window.IlyraExtras.toolLabels);
     return map[key] || ['Using tools…', 'Used tools'];
   }
   if (desktop) {
@@ -190,12 +194,12 @@
       row.setAttribute('aria-expanded', String(open));
       row.title = open ? 'Hide its thinking' : 'Show its thinking';
       renderRunThink();
-      main.scrollTop = main.scrollHeight;
+      follow();
     });
     reply.querySelector('.msg-body').after(row);
     row.after(think);
     var mini = window.createMiniOrb ? window.createMiniOrb(canvas) : null;
-    if (mini && MODELS[model]) mini.setColor(MODELS[model].rgb);
+    if (mini) mini.setColor(BRAND);
     runStatus = { el: row, think: think, text: text, orb: mini, label: 'Starting…', t0: Date.now(), timer: setInterval(updateRunStatus, 500) };
     updateRunStatus();
   }
@@ -241,7 +245,7 @@
     } else {
       body.textContent = streamText;
     }
-    main.scrollTop = main.scrollHeight;
+    follow();
   }
   if (desktop) {
     window.ilyra.onChatDelta(function (text, rid) {
@@ -281,7 +285,7 @@
       if (runStatus && runStatus.orb) runStatus.orb.kick(0.15);
       // While it runs, the thinking lives only under the status line; it folds above the reply when done.
       renderRunThink();
-      main.scrollTop = main.scrollHeight;
+      follow();
     });
     window.ilyra.onChatSources(function (list, rid) {
       if (rid && rid !== activeRequest) return;
@@ -300,7 +304,7 @@
         madeImages.push(im);
         strip.appendChild(imageTile(im, true));
       });
-      main.scrollTop = main.scrollHeight;
+      follow();
     });
     window.ilyra.onChatTool(function (tool, rid) {
       if (!pendingReply || (rid && rid !== activeRequest)) return;
@@ -340,6 +344,9 @@
 
   // ---------- Model picker ----------
   function rgb(key) { return 'rgb(' + MODELS[key].rgb.join(',') + ')'; }
+  // The page and the orb keep Ilyra's gold whatever model is picked; only each model's dot has
+  // its own colour.
+  var BRAND = [245, 165, 36];
 
   function renderModels() {
     var wrap = $('models');
@@ -362,8 +369,7 @@
     document.querySelectorAll('.model').forEach(function (b) {
       b.setAttribute('aria-checked', String(b.dataset.model === key));
     });
-    document.documentElement.style.setProperty('--accent', rgb(key));
-    orb.setColor(MODELS[key].rgb, instant);
+    orb.setColor(BRAND, instant);
     hint.textContent = MODELS[key].blurb;
     if (!busy) setOrb('idle');
     try { localStorage.setItem('ilyra.model', key); } catch (e) {}
@@ -637,22 +643,36 @@
   var main = $('main');
   function scrollDown() {
     pinned = true;
+    jumpDown.hidden = true;
     autoScrollUntil = Date.now() + 700;
     main.scrollTo({ top: main.scrollHeight, behavior: 'smooth' });
   }
-  // Follow the conversation as it grows (status lines, tools, sources, images that
-  // load late), unless you've scrolled up to read something.
-  var pinned = true, autoScrollUntil = 0;
+  // Follow the conversation as it grows (streamed text, status lines, tools, sources, images
+  // that load late), unless you've scrolled up to read something. Scrolling up always wins,
+  // even mid-stream; scrolling back to the bottom (or the arrow button) follows again.
+  var pinned = true, autoScrollUntil = 0, lastTop = 0;
+  var jumpDown = $('jumpDown');
+  function nearBottom() { return main.scrollHeight - main.scrollTop - main.clientHeight < 80; }
+  function showJump() { jumpDown.hidden = pinned || nearBottom(); }
+  function follow() {
+    if (!pinned) { showJump(); return; }
+    autoScrollUntil = Date.now() + 100;
+    main.scrollTop = main.scrollHeight;
+  }
+  function unpin() { if (main.scrollHeight > main.clientHeight + 4) { pinned = false; showJump(); } }
   main.addEventListener('scroll', function () {
-    if (Date.now() < autoScrollUntil) return;
-    pinned = main.scrollHeight - main.scrollTop - main.clientHeight < 80;
+    // Moving up is always the user (following only ever moves down).
+    if (main.scrollTop < lastTop - 2 && !nearBottom()) pinned = false;
+    else if (Date.now() >= autoScrollUntil || nearBottom()) pinned = nearBottom();
+    lastTop = main.scrollTop;
+    showJump();
   });
+  main.addEventListener('wheel', function (e) { if (e.deltaY < 0) unpin(); }, { passive: true });
+  main.addEventListener('touchstart', function () { autoScrollUntil = 0; }, { passive: true });
+  main.addEventListener('keydown', function (e) { if (/^(PageUp|ArrowUp|Home)$/.test(e.key)) unpin(); });
+  jumpDown.addEventListener('click', scrollDown);
   if ('ResizeObserver' in window) {
-    new ResizeObserver(function () {
-      if (!pinned) return;
-      autoScrollUntil = Date.now() + 100;
-      main.scrollTop = main.scrollHeight;
-    }).observe(thread);
+    new ResizeObserver(follow).observe(thread);
   }
 
   function renderMarkdown(el, text) {
@@ -1160,7 +1180,6 @@
     thinkStart = 0;
     codeRuns = [];
     startProgress();
-    orb.setColor(MODELS[model].rgb);
     setOrb('thinking', model);
     activeRequest = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     autosize();
@@ -1171,7 +1190,7 @@
       if (res.outOfCredit && selected === 'auto' && info[model]) {
         info[model].outOfCredit = true;
         var next = pick(text, images.length > 0);
-        if (next && next !== model) { model = next; orb.setColor(MODELS[next].rgb); return ask(next, history, activeRequest); }
+        if (next && next !== model) { model = next; return ask(next, history, activeRequest); }
       }
       return res;
     }).then(function (res) {
@@ -1741,6 +1760,7 @@
     try { localStorage.setItem('ilyra.settingsPage', name); } catch (e) {}
     if (name === 'briefs') loadBriefs();
     if (name === 'routing') renderRouting();
+    if (window.IlyraExtras) window.IlyraExtras.showPage(name);
   }
   function openSettings(page) {
     lastCheck = 0; refreshProviders(); renderRouting(); loadSettingsExtras(); loadConnectors();
@@ -1855,6 +1875,15 @@
     if (e.key === 'Escape' && busy && !document.querySelector('dialog[open]') && $('toolsPanel').hidden) stopReply();
   });
   promptEl.addEventListener('input', autosize);
+  // Typing to the local model loads it while you write (it can take half a minute), at most
+  // every few minutes.
+  var warmedAt = 0;
+  promptEl.addEventListener('input', function () {
+    if (!window.ilyra.warmLocal || Date.now() - warmedAt < 300000 || !promptEl.value.trim()) return;
+    if (selected !== 'local' && !(selected === 'auto' && leadActive())) return;
+    warmedAt = Date.now();
+    window.ilyra.warmLocal();
+  });
   promptEl.addEventListener('keydown', function (e) {
     if (!slashMenu.hidden && slashItems.length && !e.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -2521,6 +2550,8 @@
         '</form>';
       li.querySelector('.name').textContent = MODELS[key].name;
       li.querySelector('.avatar').textContent = MODELS[key].name.charAt(0);
+      // The providers' real logos (see logos.js).
+      if (window.IlyraLogos) window.IlyraLogos.fill(li.querySelector('.avatar'), key);
       var form = li.querySelector('form');
       var msg = li.querySelector('.provider-row-msg');
       var isLocal = key === 'local';
@@ -2641,6 +2672,8 @@
       ul.appendChild(li);
     });
   }
+  // The extras: their windows and the Library page, which lists its folders the same way (see extras.js).
+  if (window.IlyraExtras) window.IlyraExtras.init({ desktop: desktop, renderPaths: renderPaths, openArtifact: openArtifact, openChat: openChat, isOpen: function (page) { return settingsSheet.open && currentPage === page; } });
   function renderFolders(list) {
     renderPaths($('folderList'), list, 'No folders shared yet.', function (path) { window.ilyra.folders.remove(path).then(renderFolders); });
   }
@@ -2751,6 +2784,7 @@
       state.textContent = c.status === 'connected' ? 'Connected' : c.status === 'needs-auth' ? 'Needs sign-in' : c.status === 'off' ? 'Off' : c.status === 'error' ? 'Problem' : 'Not checked';
       var av = document.createElement('span');
       av.className = 'avatar'; av.textContent = c.name.charAt(0).toUpperCase();
+      if (window.IlyraLogos) window.IlyraLogos.fill(av, c.name + ' ' + (c.url || '')); // the service's logo when it's a known one
       top.appendChild(av); top.appendChild(name); top.appendChild(state);
       var meta = document.createElement('div');
       meta.className = 'connector-meta';
@@ -2764,7 +2798,8 @@
         actions.appendChild(b);
       }
       var msg = $('connectorMsg');
-      if (c.status !== 'off' && !c.hasToken) button(c.status === 'connected' ? 'Sign in again' : 'Sign in', function () { signInTo(c); });
+      // A rejected token can't block signing in: "Sign in" shows whenever the service wants one.
+      if (c.status === 'needs-auth' || (c.status !== 'off' && !c.hasToken)) button(c.status === 'connected' ? 'Sign in again' : 'Sign in', function () { signInTo(c); }, c.status === 'needs-auth' ? 'primary' : '');
       button('Check again', function () { window.ilyra.connectors.refresh(c.id).then(loadConnectors); });
       var trust = document.createElement('label');
       var box = document.createElement('input');
@@ -2786,7 +2821,7 @@
   // Opens the service's login page in your browser; this finishes when you've signed in there.
   function signInTo(c) {
     var msg = $('connectorMsg');
-    msg.textContent = 'Your browser opened. Sign in to ' + c.name + ' there, then come back (it waits up to 3 minutes)…'; msg.className = 'provider-row-msg';
+    msg.textContent = 'Opening your browser. Sign in to ' + c.name + ' there, then come back (it waits up to 3 minutes)…'; msg.className = 'provider-row-msg';
     return window.ilyra.connectors.signIn(c.id).then(function (r) {
       if (r && r.error) { msg.textContent = 'Sign-in didn\'t finish: ' + r.error; msg.className = 'provider-row-msg bad'; }
       else if (r && r.status === 'connected') { msg.textContent = 'Signed in to ' + c.name + '. Your models can use its ' + r.tools.length + ' tools now.'; msg.className = 'provider-row-msg good'; }

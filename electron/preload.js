@@ -71,6 +71,14 @@ contextBridge.exposeInMainWorld('ilyra', {
     signIn: invoke('connectors:signin')
   },
 
+  // The extras: the artifacts gallery, background tasks, web API keys, skills and the library (see extras/index.js)
+  artifacts: { list: invoke('artifacts:list'), get: invoke('artifacts:get') },
+  work: { list: invoke('work:list'), get: invoke('work:get'), start: invoke('work:start'), stop: invoke('work:stop'), retry: invoke('work:retry'), remove: invoke('work:remove'), open: invoke('work:open') },
+  apis: { list: invoke('apis:list'), save: invoke('apis:save'), remove: invoke('apis:remove') },
+  skills: { list: invoke('skills:list'), get: invoke('skills:get'), setEnabled: invoke('skills:setEnabled'), remove: invoke('skills:remove'), addUrl: invoke('skills:addUrl'), addFolder: invoke('skills:addFolder'), open: invoke('skills:open') },
+  onWorkChanged: (fn) => ipcRenderer.on('work:changed', (_e, id) => fn(id)),
+  library: { status: invoke('library:status'), add: invoke('library:add'), remove: invoke('library:remove'), reindex: invoke('library:reindex') },
+
   // Sent by the main process: the tray, notifications and scheduled tasks
   onOpenChat: (fn) => ipcRenderer.on('app:openChat', (_e, id) => fn(id)),
   onChatsChanged: (fn) => ipcRenderer.on('app:chatsChanged', () => fn()),

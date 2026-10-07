@@ -8,6 +8,7 @@
   <title>Ilyra</title>
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'; frame-src ilyra-artifact: 'self'; media-src 'self' data: blob:" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="extras.css" />
 </head>
 <body>
   <div class="shell">
@@ -32,6 +33,21 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </div>
+    <!-- Every page Ilyra has made (see extras.js) -->
+    <button class="side-link" id="artifactsButton" type="button" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M7 6.5h.01M10 6.5h.01"/></svg>
+      <span>Artifacts</span>
+    </button>
+    <!-- Background tasks (see extras.js) -->
+    <button class="side-link" id="tasksButton" type="button" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>
+      <span>Tasks</span><span class="side-badge" id="tasksBadge" hidden></span>
+    </button>
+    <!-- Skills (see extras.js and electron/extras/skills.js) -->
+    <button class="side-link" id="skillsButton" type="button" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.4 5.2 5.6.6-4.2 3.8 1.2 5.5L12 15.3 7 18.1l1.2-5.5L4 8.8l5.6-.6z"/></svg>
+      <span>Skills</span><span class="side-badge" id="skillsBadge" hidden></span>
+    </button>
     <nav class="chat-list" id="chatList" aria-label="Saved chats"></nav>
     <div class="usage" id="usage" hidden>
       <button class="usage-head" id="usageToggle" type="button" aria-expanded="false" title="Tokens used on this computer">
@@ -88,6 +104,9 @@
 
   <footer class="dock">
     <div class="dock-inner">
+      <button class="jump-down" id="jumpDown" type="button" aria-label="Jump to the latest" title="Jump to the latest" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6"/></svg>
+      </button>
       <div class="approval-bar" id="approvalBar" role="status" hidden>
         <span class="approval-text"></span>
         <button class="link-btn" id="approvalOff" type="button">Turn off</button>
@@ -181,6 +200,79 @@
   </aside>
   </div>
 
+  <!-- The artifacts gallery (see extras.js) -->
+  <dialog class="sheet gallery" id="gallerySheet" aria-labelledby="galleryTitle">
+    <header class="gallery-head">
+      <h1 id="galleryTitle">Artifacts</h1>
+      <label class="search gallery-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+        <input id="gallerySearch" type="search" placeholder="Search pages" autocomplete="off" spellcheck="false" aria-label="Search pages" />
+      </label>
+      <button class="icon-btn" id="galleryClose" type="button" aria-label="Close" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <p class="gallery-note" id="galleryNote" role="status"></p>
+    <ul class="gallery-grid" id="galleryGrid"></ul>
+  </dialog>
+
+  <!-- Background tasks (see extras.js and electron/extras/tasks.js) -->
+  <dialog class="sheet gallery work" id="workSheet" aria-labelledby="workTitle">
+    <header class="gallery-head">
+      <h1 id="workTitle">Tasks</h1>
+      <button class="save work-new" id="workNew" type="button">New task</button>
+      <button class="icon-btn" id="workClose" type="button" aria-label="Close" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="work-body">
+      <ul class="work-list" id="workList" aria-label="Tasks"></ul>
+      <section class="work-detail" id="workDetail" aria-live="polite"></section>
+      <form class="work-form" id="workForm" hidden>
+        <h2>Hand Ilyra a task</h2>
+        <p class="page-sub">It works on its own: plans, does each step, checks the result and tells you when it's done. You can close this and keep chatting.</p>
+        <label>Name<input id="workFormTitle" maxlength="80" placeholder="Weekly news summary" autocomplete="off" /></label>
+        <label>The task<textarea id="workFormPrompt" rows="6" maxlength="8000" placeholder="Find the five biggest tech news stories this week. For each, read two sources and write me a short summary with links, saved as a document."></textarea></label>
+        <fieldset>
+          <legend>What it may do without asking</legend>
+          <label class="check"><span>Files</span><select id="workFormFiles"><option value="task">Only its own folder</option><option value="read">Also read my shared folders</option><option value="write">Also change my shared folders</option></select></label>
+          <label class="check"><span>Search and open web pages</span><input type="checkbox" id="workFormWeb" checked /></label>
+          <label class="check"><span>Web APIs</span><select id="workFormHttp"><option value="off">Ask first</option><option value="read">Read freely, ask before changing</option><option value="all">Call freely</option></select></label>
+          <label class="check"><span>Use connectors</span><input type="checkbox" id="workFormConnectors" /></label>
+          <label class="check"><span>Click and type on web pages</span><input type="checkbox" id="workFormBrowse" /></label>
+          <label class="check"><span>Ask cloud models for help</span><input type="checkbox" id="workFormCloud" /></label>
+          <label class="check"><span>Have a cloud model check the result</span><input type="checkbox" id="workFormReview" checked /></label>
+        </fieldset>
+        <p class="provider-row-msg" id="workFormMsg" role="status"></p>
+        <div class="work-form-actions"><button type="button" class="link-btn" id="workFormCancel">Cancel</button><button type="submit" class="save">Start</button></div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Skills (see extras.js and electron/extras/skills.js) -->
+  <dialog class="sheet gallery work skills" id="skillsSheet" aria-labelledby="skillsTitle">
+    <header class="gallery-head">
+      <h1 id="skillsTitle">Skills</h1>
+      <button class="save work-new" id="skillsNew" type="button">Add skills</button>
+      <button class="icon-btn" id="skillsClose" type="button" aria-label="Close" title="Close (Esc)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="work-body">
+      <ul class="work-list" id="skillsList" aria-label="Skills"></ul>
+      <section class="work-detail" id="skillsDetail" aria-live="polite"></section>
+      <form class="work-form" id="skillsForm" hidden>
+        <h2>Add skills</h2>
+        <p class="page-sub">A skill is a folder with a SKILL.md file: instructions for one kind of work, like designing a page or writing in a certain style. Ilyra sees each one's name and description, and reads the whole skill only when a request needs it.</p>
+        <label>From GitHub<input id="skillsUrl" type="url" placeholder="https://github.com/owner/repo" autocomplete="off" spellcheck="false" /></label>
+        <p class="work-hint">A repository, a folder in one (…/tree/main/skills/my-skill), or a link to a SKILL.md file. Every skill found is added.</p>
+        <p class="provider-row-msg" id="skillsMsg" role="status"></p>
+        <div class="work-form-actions"><button type="button" class="link-btn" id="skillsFolder">Add from a folder on this PC</button><button type="button" class="link-btn" id="skillsCancel">Cancel</button><button type="submit" class="save" id="skillsAdd">Add</button></div>
+        <p class="work-hint">Skills are instructions written by other people. Read one before you turn it on: Ilyra follows it when it does that kind of work. Ilyra never runs the scripts some skills include.</p>
+      </form>
+    </div>
+  </dialog>
+
   <dialog class="sheet prefs" id="settingsSheet" aria-labelledby="settingsTitle">
     <nav class="prefs-nav" role="tablist" aria-label="Settings">
       <h1 class="prefs-title" id="settingsTitle">Settings</h1>
@@ -189,6 +281,7 @@
       <button type="button" class="nav-item" role="tab" data-page="routing" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.5 6H12a3 3 0 0 1 3 3M8.5 18H12a3 3 0 0 0 3-3"/></svg><span>Who handles what</span></button>
       <button type="button" class="nav-item" role="tab" data-page="memory" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg><span>Memory</span></button>
       <button type="button" class="nav-item" role="tab" data-page="briefs" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/></svg><span>Briefs</span></button>
+      <button type="button" class="nav-item" role="tab" data-page="library" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="4" height="16" rx="1"/><rect x="10" y="4" width="4" height="16" rx="1"/><path d="M16.2 5.2l3-.8 3.3 14.6-3 .8z"/></svg><span>Library</span></button>
       <button type="button" class="nav-item" role="tab" data-page="voice" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg><span>Voice</span></button>
       <button type="button" class="nav-item" role="tab" data-page="tasks" aria-selected="false"><svg class="nav-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><span>Scheduled tasks</span></button>
       <div class="nav-group">Connections</div>
@@ -260,6 +353,21 @@
         <header class="page-head"><div><h2>AI models</h2><p class="page-sub">Keys are encrypted and stored only on this computer. They go straight to each provider and nowhere else. Local models need no key, just a model server like Ollama or LM Studio running on your computer.</p></div></header>
         <ul class="provider-list rows" id="providerList"></ul>
         <p class="sheet-note" id="sheetNote"></p>
+        <div class="rows extra-cards">
+          <!-- Keys for web APIs, used by http_request (electron/extras/http.js) -->
+          <div class="provider-row" id="apisCard">
+            <div class="provider-row-head"><span class="avatar">{ }</span><span class="name">Web API keys<small>For services with an API. Each key is sent only to its own website.</small></span><span class="state" id="apisState"></span></div>
+            <ul class="api-list" id="apisList"></ul>
+            <form class="provider-row-form api-form" id="apisForm">
+              <input id="apisName" maxlength="32" autocomplete="off" spellcheck="false" aria-label="Name" placeholder="Name, like render" />
+              <input id="apisSite" autocomplete="off" spellcheck="false" aria-label="Website" placeholder="Website, like api.render.com" />
+              <input id="apisHeader" autocomplete="off" spellcheck="false" aria-label="Header" placeholder="Header (Authorization)" />
+              <input class="key" id="apisKey" type="password" autocomplete="off" spellcheck="false" aria-label="Key" placeholder="Paste the key" />
+              <div class="provider-row-actions"><button type="submit" class="save">Save key</button></div>
+              <p class="provider-row-msg" id="apisMsg" role="status"></p>
+            </form>
+          </div>
+        </div>
       </section>
       <section class="page" data-page="connectors" role="tabpanel" hidden>
         <header class="page-head"><div><h2>Connectors</h2><p class="page-sub">Services Ilyra can reach for you. Your models can use them; Ilyra asks before each use unless you trust the connector.</p></div></header>
@@ -283,6 +391,15 @@
         <button type="button" class="save folder-add" id="addFolder">Share a folder</button>
         <p class="page-foot">Old copies are kept for two weeks in Ilyra's backups folder. Files that usually hold secrets (.env, private keys, credentials) are always off limits.</p>
       </section>
+      <!-- The library (see extras.js) -->
+      <section class="page" data-page="library" role="tabpanel" hidden>
+        <header class="page-head"><div><h2>Library</h2><p class="page-sub">Your own documents (notes, project docs, exported wikis) that Ilyra searches by meaning. Markdown and text files only. Ilyra reads them and never changes them.</p></div></header>
+        <p class="page-sub" id="libraryHome"></p>
+        <ul class="folder-list rows" id="libraryList"></ul>
+        <div class="settings-row"><span class="settings-count" id="libraryStatus" role="status"></span><button type="button" class="link-btn" id="libraryReindex">Re-index</button></div>
+        <button type="button" class="save folder-add" id="libraryAdd">Add a folder from elsewhere</button>
+        <p class="page-foot">Your Local model gets the best-matching sections by itself. Cloud models search the library when they need to, which sends those sections to that provider. Files that usually hold secrets are always skipped.</p>
+      </section>
     </div>
   </dialog>
 
@@ -291,6 +408,9 @@
   <script src="orb.js"></script>
   <script src="miniorb.js"></script>
   <script src="vad.js"></script>
+  <!-- extras.js must load before app.js -->
+  <script src="logos.js"></script>
+  <script src="extras.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

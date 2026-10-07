@@ -154,7 +154,17 @@ body.active .main { padding-top: 12px; }
 
 /* ---------- Composer ---------- */
 .dock { flex: none; padding: 8px 16px max(16px, env(safe-area-inset-bottom)); }
-.dock-inner { width: min(720px, 100%); margin: 0 auto; }
+.dock-inner { width: min(720px, 100%); margin: 0 auto; position: relative; }
+/* Shown when you've scrolled up from the newest messages */
+.jump-down {
+  position: absolute; left: 50%; top: -46px; transform: translateX(-50%); z-index: 3;
+  width: 34px; height: 34px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--line-strong); border-radius: 50%; background: var(--panel-2); color: var(--ink);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45); cursor: pointer;
+}
+.jump-down:hover { background: var(--panel); border-color: #4a4e57; }
+.jump-down[hidden] { display: none; }
+.jump-down svg { width: 16px; height: 16px; }
 .composer-wrap { position: relative; }
 .composer {
   background: var(--panel);
@@ -230,7 +240,8 @@ textarea:focus-visible { outline: 0; }
 }
 .model i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); opacity: .6; }
 .model:hover { color: var(--ink); border-color: #4a4e57; }
-.model[aria-checked="true"] { color: var(--ink); background: color-mix(in srgb, var(--c) 12%, var(--field)); border-color: color-mix(in srgb, var(--c) 70%, var(--line-strong)); }
+.model[aria-checked="true"] { color: var(--ink); background: var(--panel-2); border-color: var(--line-strong); }
+.model[aria-checked="true"] i { opacity: 1; }
 .model[aria-checked="true"] i { opacity: 1; }
 .model-pick, .model-select, .context-select {
   width: 100%; padding: 8px 10px; border-radius: var(--r-sm);

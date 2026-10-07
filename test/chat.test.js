@@ -80,7 +80,10 @@ PROVIDERS.claude.adapter.step = async ({ system, native, onText }) => {
   PROVIDERS.local.adapter.step = async (o) => { localAsk = o; o.onText('Hi.'); return { text: 'Hi.', calls: [], raw: {}, usage: null }; };
   const localRes = await handlers.chat(event, 'local', [{ role: 'user', content: 'hi' }], { requestId: 'rl', chatId: 'cl', web: true, code: true });
   assert.ok(!localRes.error && localAsk.key === 'http://localhost:11434', 'a local reply goes to that server');
-  assert.ok(!localAsk.web && !localAsk.code && !/You can search the web/.test(localAsk.system), 'a local model is not told it can search the web or run code');
+  assert.ok(!localAsk.web && !localAsk.code, 'a local server is not asked to search or run code itself');
+  // The local model searches and runs code through Ilyra's own tools instead (extras/tools.js).
+  const localTools = localAsk.tools.map((t) => t.name);
+  assert.ok(localTools.includes('web_search') && localTools.includes('run_code') && /web_search/.test(localAsk.system), 'a local model gets web_search and run_code as its own tools');
   assert.ok(!localAsk.tools.some((t) => ['save_memory', 'write_file', 'schedule_task', 'read_file', 'search_chats'].includes(t.name)), 'a small local model gets tools only when the message is about them');
 
   // ---- how much the local model keeps: by its size, or as Settings say

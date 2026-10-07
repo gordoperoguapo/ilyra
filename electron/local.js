@@ -129,6 +129,8 @@ function sizeOf(address, model) {
 
 // Loads the model ahead of a message (when talk mode starts), with the same settings chat
 // uses, so the first reply doesn't wait for it. Only Ollama can be asked to.
+// Loads the model now, with the same context size as the replies (a different one reloads it).
+// How long it stays loaded is the server's own setting.
 async function warm(address, model) {
   if (await kindOf(address) !== 'ollama') return;
   await request(address, '/api/generate', { body: { model, options: { num_ctx: contextSize } }, timeout: WARM_TIMEOUT });
@@ -293,7 +295,12 @@ async function ollamaStep({ address, model, system, native, tools, thinking, sig
     if (!line.trim()) return;
     const j = JSON.parse(line);
     if (j.error) throw new Error(j.error);
-    if (j.done) usage = { input: j.prompt_eval_count || 0, output: j.eval_count || 0 };
+    if (j.done) {
+      // Ollama's own timings, for the speed log: loading the model, reading the prompt, writing.
+      const ms = (ns) => (Number.isFinite(ns) ? Math.round(ns / 1e6) : null);
+      usage = { input: j.prompt_eval_count || 0, output: j.eval_count || 0,
+        timing: { loadMs: ms(j.load_duration), promptMs: ms(j.prompt_eval_duration), writeMs: ms(j.eval_duration), totalMs: ms(j.total_duration), promptTokens: j.prompt_eval_count || 0, outputTokens: j.eval_count || 0, thinkingChars: thought.length } };
+    }
     const m = j.message || {};
     if (m.thinking) { thought += m.thinking; if (onThinking) onThinking(m.thinking); }
     if (m.content) split.push(m.content);

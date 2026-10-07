@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { default: OpenAI } = require('openai');
 
+// The extras: background tasks, skills, the library, recall, the artifacts gallery and more
+// (see extras/index.js).
+const extras = require('./extras');
+
 const { runAgent } = require('./agent');
 const artifactStore = require('./artifacts');
 const chatState = require('./chat');
@@ -201,6 +205,9 @@ function notify(title, body, chatId) {
 
 // ---------- Providers ----------
 
+// The extras' tools and their IPC calls.
+extras.install({ app, ipcMain, dialog, BrowserWindow, keystore, getWindow: () => mainWindow });
+
 // How much the local model takes on when it leads (Settings, Who handles what). On Automatic, a
 // model of about 20B parameters or more keeps the heavy work too; a smaller one, or one whose
 // size is unknown, keeps everyday chat and hands the rest to the cloud.
@@ -317,7 +324,18 @@ ipcMain.handle('usage:get', () => usage.summary());
 const connectors = mcp.createManager({
   file: path.join(DATA_DIR, 'connectors.json'),
   secrets: { get: (k) => keystore.getKey(k), set: (k, v) => keystore.set(k, { key: v }), remove: (k) => keystore.remove(k) },
-  openExternal: (url) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); }
+  // When no browser opens, the sign-in link is offered to copy instead, and each step of a
+  // sign-in goes to connect.log in Ilyra's data folder (see extras/index.js diag).
+  openExternal: (url) => {
+    if (!/^https?:\/\//.test(url)) return;
+    extras.diag('connect', `opening browser for ${new URL(url).host}`);
+    shell.openExternal(url).then(() => extras.diag('connect', 'browser opened'), (err) => {
+      extras.diag('connect', `browser did not open: ${err && err.message}`);
+      dialog.showMessageBox(mainWindow, { type: 'info', title: 'Ilyra', message: "Your browser didn't open for the sign-in.", detail: 'Copy the sign-in link, paste it into your browser and sign in there. Ilyra waits up to 3 minutes.', buttons: ['Copy the link', 'Cancel'], defaultId: 0, cancelId: 1, noLink: true })
+        .then((r) => { if (r.response === 0) clipboard.writeText(url); }, () => {});
+    });
+  },
+  log: (line) => extras.diag('connect', line)
 });
 
 ipcMain.handle('connectors:list', () => connectors.list());
@@ -329,28 +347,24 @@ ipcMain.handle('connectors:signin', async (_e, id) => { try { return await conne
 
 // ---------- Chat ----------
 
-// Every file change asks first. "Allow edits in this chat" covers up to 10 edits or 30 minutes
-// in that one chat, shows a banner, and can be switched off. Only file edits can be approved
-// ahead; everything else (memory, clipboard, opening pages, scheduling) is asked each time.
+// Approval is once per task. The first thing a reply needs asks, and "Allow for this task"
+// answers 'task', which approves everything else that reply does (see extras.forTask).
+// Edits already allowed in this chat (an older grant) still go through without asking.
 function makeConfirm({ win, chatId, signal, send }) {
   const ask = async (box) => {
     try { return await dialog.showMessageBox(win, Object.assign({ type: 'question', noLink: true, title: 'Ilyra', signal }, box)); } catch { return null; }
   };
   return async (change) => {
     const detail = `${change.path}\n\n${change.detail}`;
-    if (change.kind && change.kind !== 'edit') {
-      if (change.kind === 'clipboard-read' && chatState.clipboardAllowed(chatId)) return true;
-      const res = await ask({ buttons: ['Allow', 'Deny'], defaultId: 1, cancelId: 1, message: change.title, detail });
-      if (!res || signal.aborted || res.response !== 0) return false;
-      if (change.kind === 'clipboard-read') chatState.allowClipboard(chatId);
-      return true;
+    if (change.kind === 'clipboard-read' && chatState.clipboardAllowed(chatId)) return true;
+    if (!change.kind || change.kind === 'edit') {
+      const granted = chatState.consume(chatId);
+      if (granted) { send('chat:approval', granted); return true; }
     }
-    const granted = chatState.consume(chatId);
-    if (granted) { send('chat:approval', granted); return true; }
-    const res = await ask({ buttons: ['Allow', 'Allow edits in this chat for 30 minutes (up to 10)', 'Deny'], defaultId: 2, cancelId: 2, message: change.title, detail });
-    if (!res || signal.aborted) return false;
-    if (res.response === 1 && chatId) send('chat:approval', chatState.grant(chatId));
-    return res.response !== 2;
+    const res = await ask({ buttons: ['Allow for this task', 'Allow once', 'Deny'], defaultId: 0, cancelId: 2, message: change.title, detail });
+    if (!res || signal.aborted || res.response === 2) return false;
+    if (change.kind === 'clipboard-read') chatState.allowClipboard(chatId);
+    return res.response === 0 ? 'task' : true;
   };
 }
 
@@ -461,6 +475,8 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
   const controller = chatState.begin(e.sender.id, requestId);
   if (!controller) return { error: 'Ilyra is still answering your last message. Wait for it, or press Stop.' };
   const signal = controller.signal;
+  // The speed log times each step of this reply (see extras/speed.js).
+  const timer = extras.speed.start({ provider: id, model, local: Boolean(p.local), from: 'PC', thinking: options.voice ? 'off' : options.thinking || 'medium', voice: Boolean(options.voice) });
   const send = (channel, payload) => { if (!e.sender.isDestroyed()) e.sender.send(channel, payload, requestId); };
 
   // What has been shown so far, so a stopped reply keeps it. The shown text passes through a
@@ -482,7 +498,7 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
   const used = { input: 0, output: 0 };
   const addUsage = (u) => { if (!u) return; used.input += u.input || 0; used.output += u.output || 0; usage.record(id, u.input, u.output); };
 
-  const confirm = makeConfirm({ win: BrowserWindow.fromWebContents(e.sender), chatId, signal, send });
+  const confirm = extras.forTask(makeConfirm({ win: BrowserWindow.fromWebContents(e.sender), chatId, signal, send }));
   const generateImage = makeImageGenerator({ id, preferred: options.imageProvider, inputImages: (lastUser && lastUser.images) || [], signal, send });
   const cloud = PROVIDER_IDS.filter((k) => !PROVIDERS[k].local);
   const chosen = Array.isArray(options.delegates) && options.delegates.length ? options.delegates.filter((k) => cloud.includes(k)) : cloud;
@@ -490,17 +506,23 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
   const askModel = makeAskModel({ delegates, options, signal, send });
   const forceTool = generateImage && ASKED_FOR_IMAGE.test(lastText) && !ASKED_FOR_MARKUP.test(lastText) ? 'generate_image' : null;
   const memoryNote = lastText ? await learnFrom(lastText, { confirm, signal, send }) : '';
+  timer.stage('memory');
 
   // Where the user is now, refreshed at most every 20 minutes (the very first lookup waits briefly).
   const locationOn = store.settings.get().location;
   if (locationOn) await location.refresh({ wait: 2500 });
   const here = locationOn ? location.current() : null;
+  timer.stage('location');
+  const connectorDefs = await connectorTools();
+  timer.stage('connectors');
+  const extrasCtx = await extras.forChat({ provider: p, messages, lastText, chatId, options, send });
+  timer.stage('lookups');
 
   const base = {
     id, key, messages, signal, confirm, generateImage, forceTool,
     roots: store.folders.list(),
     memory: memoryAdapter(), clipboard: clipboardAdapter, scheduler,
-    connectors: await connectorTools(),
+    connectors: connectorDefs,
     makePdf: sandbox.makePdf, downloads: app.getPath('downloads'),
     // Web search and running code happen in the cloud providers' own sandboxes; reading a
     // page (fetch_page) is Ilyra's and works with any model.
@@ -515,17 +537,21 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
     briefs: store.briefs.get().trim(),
     here,
     hereNote: here ? `${here.label}${here.timezone ? ` (time zone ${here.timezone})` : ''}` : '',
+    // What the extras looked up before the reply, and which of their tools it may use.
+    extras: extrasCtx,
     // /compact: the older part of this chat, summarized, replaces those messages.
     summary: typeof options.summary === 'string' ? options.summary.slice(0, 6000) : '',
     // Any model can answer "how many tokens have I used?" from Ilyra's own tally.
     usageNote: usage.asks(lastText) ? usage.report().text : '',
     onUsage: addUsage,
-    onThinking: (t) => send('chat:thinking', t),
+    onThinking: (t) => { timer.first('thinking'); send('chat:thinking', t); },
+    onStep: (s) => timer.step(s),
     onImage: (images) => send('chat:image', images),
     onSources: (list) => send('chat:sources', list),
     onRun: (run) => send('chat:code', run),
-    onTool: (t) => { toolRan = true; send('chat:tool', t); },
+    onTool: (t) => { toolRan = true; timer.tool(t); send('chat:tool', { name: t.name, summary: t.summary, isError: t.isError }); },
     onText: (t) => {
+      timer.first('text');
       if (!toneFilter) toneFilter = tone.createToneFilter((shown) => { partial += shown; send('chat:delta', shown); }, toneOptions);
       toneFilter.push(t);
     }
@@ -622,11 +648,13 @@ ipcMain.handle('chat', async (e, id, messages, options = {}) => {
     return { error: `${p.name} (${lastModel}): ${friendlyError(lastErr)}` };
   };
 
+  let out = null;
   try {
-    const out = await run();
+    out = await run();
     if (used.input || used.output) out.usage = { input: used.input, output: used.output };
     return out;
   } finally {
+    timer.end({ error: Boolean(!out || out.error), cancelled: Boolean(out && out.cancelled) });
     chatState.end(e.sender.id, requestId);
   }
 });
@@ -820,13 +848,55 @@ async function runScheduledRequest(task) {
   }
 }
 
+// ---------- Background tasks (see extras/tasks.js) ----------
+
+// What a background task needs from here. The local model does the work when it's connected;
+// a cloud model reviews the result (Claude first).
+function taskHost() {
+  const who = (id) => (id ? { id, key: keystore.getKey(id), model: modelFor(id), name: PROVIDERS[id].name, local: Boolean(PROVIDERS[id].local) } : null);
+  const cloud = () => connectedProviders().filter((k) => !PROVIDERS[k].local);
+  return {
+    runAgent,
+    pick: () => who(keystore.getKey('local') && !outOfCredit.has('local') ? 'local' : connectedProviders()[0]),
+    reviewer: () => who(['claude', 'chatgpt', 'gemini'].find((k) => cloud().includes(k))),
+    base: async (worker, signal) => {
+      const p = PROVIDERS[worker.id];
+      const delegates = p.local ? cloud() : [];
+      const send = () => {};
+      return {
+        memory: Object.assign(memoryAdapter(), { autoSave: false }),
+        makePdf: sandbox.makePdf, downloads: app.getPath('downloads'),
+        web: p.canSearch !== false, fetch: true, code: p.canRunCode !== false,
+        generateImage: makeImageGenerator({ id: worker.id, preferred: null, inputImages: [], signal, send }),
+        askModel: makeAskModel({ delegates, options: {}, signal, send }), askNames: delegates,
+        briefs: store.briefs.get().trim(), lean: false, timeout: 300000
+      };
+    },
+    connectors: connectorTools,
+    roots: () => store.folders.list(),
+    // At the PC: a dialog on Ilyra's window (Allow for this task / Allow once / Deny).
+    pcConfirm: (signal) => makeConfirm({ win: mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0], chatId: 'task', signal, send: () => {} }),
+    notify,
+    // The result as a chat, so it's there with the others.
+    saveChat: ({ title, prompt, text }) => {
+      const at = Date.now();
+      const chat = { id: 'w' + at.toString(36), title, updated: at, messages: [{ role: 'user', content: prompt, at }, { role: 'assistant', content: text, model: 'local', at }] };
+      store.chats.save(chat);
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:chatsChanged');
+      return chat.id;
+    }
+  };
+}
+
 let ticking = false;
 async function runDueTasks() {
   if (ticking) return;
   ticking = true;
   try {
     for (const task of scheduler.due()) {
-      if (task.prompt) await runScheduledRequest(task);
+      // A scheduled background task joins the task queue (grants: web, its own folder).
+      if (task.prompt && task.background) extras.startTask({ title: task.title, prompt: task.prompt, from: 'schedule' });
+      else if (task.prompt) await runScheduledRequest(task);
       else notify('Reminder', task.title);
     }
   } catch { /* a bad task must never stop the clock */ } finally { ticking = false; }
@@ -862,10 +932,12 @@ if (!app.requestSingleInstanceLock()) {
     if (store.settings.get().location) location.refresh();
     voice.warm(SPEECH_MODELS);
     pruneBackups();
+    extras.start();
+    extras.startTasks(taskHost());
     setInterval(runDueTasks, 20000);
     setTimeout(runDueTasks, 3000);
   });
 }
 
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => { quitting = true; extras.stop(); });
 app.on('window-all-closed', () => { if (!store.settings.get().background) app.quit(); });

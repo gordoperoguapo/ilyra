@@ -30,13 +30,15 @@ function nextOccurrence(spec, after) {
   return null;
 }
 
-// spec: { title, prompt?, when? (local date-time text), repeat?, time?, day? }
+// spec: { title, prompt?, when? (local date-time text), repeat?, time?, day?, background? }
 function add(spec, now = Date.now()) {
   const list = store.tasks.list();
   if (list.length >= MAX_TASKS) throw new Error(`There are already ${MAX_TASKS} scheduled tasks. Cancel one first.`);
   const title = String(spec.title || '').trim().slice(0, 80);
   if (!title) throw new Error('A scheduled task needs a title.');
   const task = { id: 't' + now.toString(36) + Math.random().toString(36).slice(2, 5), title, prompt: spec.prompt ? String(spec.prompt).slice(0, 1000) : null, createdAt: now };
+  // Run the prompt as a background task (extras/tasks.js) instead of one reply.
+  if (spec.background && task.prompt) task.background = true;
   if (spec.repeat) {
     if (!['daily', 'weekdays', 'weekly'].includes(spec.repeat)) throw new Error('repeat must be daily, weekdays or weekly.');
     task.repeat = spec.repeat;

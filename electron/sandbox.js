@@ -38,4 +38,5 @@ function makePdf(html) {
   });
 }
 
-module.exports = { makePdf };
+// withWindow is also used by extras/runcode.js.
+module.exports = { makePdf, withWindow };

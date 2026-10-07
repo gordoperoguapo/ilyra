@@ -49,7 +49,41 @@ function checkUrl(raw) {
 }
 
 // The state of one server's sign-in, kept encrypted: { token } and/or { tokens, clientInfo }.
-function createManager({ file, secrets, openExternal, confirmGlobal } = {}) {
+// A server's tool schema, made safe for every model. Cloud models shrug off odd schemas, but
+// Ollama refuses the whole request ("properties must be an object") if any tool has properties
+// that aren't an object, which broke the local model as soon as such a connector was added.
+const SUBSCHEMA_LISTS = ['anyOf', 'oneOf', 'allOf', 'prefixItems'];
+function cleanNode(node, depth) {
+  if (!node || typeof node !== 'object' || Array.isArray(node) || depth > 20) return {};
+  const out = Object.assign({}, node);
+  if ('properties' in out) {
+    const props = out.properties && typeof out.properties === 'object' && !Array.isArray(out.properties) ? out.properties : {};
+    out.properties = {};
+    for (const [k, v] of Object.entries(props)) out.properties[k] = cleanNode(v, depth + 1);
+  }
+  if (out.type === 'object' && !('properties' in out)) out.properties = {};
+  if ('required' in out && !(Array.isArray(out.required) && out.required.every((r) => typeof r === 'string'))) delete out.required;
+  if ('items' in out) out.items = Array.isArray(out.items) ? out.items.map((v) => cleanNode(v, depth + 1)) : cleanNode(out.items, depth + 1);
+  if (out.additionalProperties && typeof out.additionalProperties === 'object') out.additionalProperties = cleanNode(out.additionalProperties, depth + 1);
+  for (const key of SUBSCHEMA_LISTS) {
+    if (key in out) { if (Array.isArray(out[key])) out[key] = out[key].map((v) => cleanNode(v, depth + 1)); else delete out[key]; }
+  }
+  for (const key of ['$defs', 'definitions']) {
+    if (key in out) {
+      const defs = out[key] && typeof out[key] === 'object' && !Array.isArray(out[key]) ? out[key] : {};
+      out[key] = {};
+      for (const [k, v] of Object.entries(defs)) out[key][k] = cleanNode(v, depth + 1);
+    }
+  }
+  return out;
+}
+function cleanSchema(schema) {
+  const top = cleanNode(schema, 0);
+  // A tool's parameters are always an object with properties.
+  return Object.assign(top, { type: 'object', properties: top.properties || {} });
+}
+
+function createManager({ file, secrets, openExternal, confirmGlobal, log = () => {} } = {}) {
   let servers = [];
   const live = new Map();   // id -> { client, transport, tools, at, status, error }
   const names = new Map();  // tool name given to the model -> { id, tool }
@@ -221,25 +255,39 @@ function createManager({ file, secrets, openExternal, confirmGlobal } = {}) {
       const e0 = live.get(id);
       if (e0 && e0.client) { try { await e0.client.close(); } catch { /* ignore */ } }
       live.delete(id);
-      const s0 = secret(id); delete s0.tokens; delete s0.clientInfo; setSecret(id, s0); // register fresh for this sign-in's address
+      // Register fresh for this sign-in's address. A pasted token goes too: the browser sign-in
+      // replaces it, and a stale one sent alongside would get the sign-in itself refused.
+      const s0 = secret(id); delete s0.tokens; delete s0.clientInfo; delete s0.token; setSecret(id, s0);
       const wanted = crypto.randomBytes(16).toString('hex');
+      log(`sign-in start ${server.name} ${new URL(server.url).host}`);
       const cb = await callbackServer(wanted);
+      log(`waiting on localhost:${cb.port}`);
       const auth = provider(id, `http://localhost:${cb.port}/callback`, true, wanted);
       try {
         for (const kind of ['http', 'sse']) {
           const transport = makeTransport(server, kind, auth);
           const client = new (sdk().Client)({ name: 'Ilyra', version: '1.0.0' }, { capabilities: {} });
-          try { await client.connect(transport); await client.close(); break; }
+          try { await client.connect(transport); await client.close(); log(`${kind}: connected without a sign-in`); break; }
           catch (err) {
+            log(`${kind}: ${isAuthError(err) ? 'needs sign-in' : 'error'} ${String((err && err.message) || err).slice(0, 200)}${auth.authUrl ? '' : ' (no sign-in page was offered)'}`);
             if (isAuthError(err) || (err && err.code === 401)) {
-              await transport.finishAuth(await cb.code);
+              if (!auth.authUrl) throw new Error(`${server.name} didn't offer a sign-in page: ${String((err && err.message) || err).slice(0, 200)}`);
+              const code = await cb.code;
+              log('browser came back with a code');
+              await transport.finishAuth(code);
+              log('signed in');
               break;
             }
             if (kind === 'sse') throw err;
           }
         }
+      } catch (err) {
+        log(`sign-in failed: ${String((err && err.message) || err).slice(0, 300)}`);
+        throw err;
       } finally { cb.close(); }
-      return await this.refresh(id);
+      const st = await this.refresh(id);
+      log(`after sign-in: ${st && st.status} ${(st && st.error) || ''}`);
+      return st;
     },
 
     // What the models are offered: connected, enabled servers' tools, named mcp_<server>_<tool>.
@@ -254,7 +302,7 @@ function createManager({ file, secrets, openExternal, confirmGlobal } = {}) {
           let name = `mcp_${slug(s.name).slice(0, 14)}_${slug(t.name).slice(0, 36)}`;
           for (let n = 2; names.has(name); n++) name = name.slice(0, 60) + '_' + n;
           names.set(name, { id: s.id, tool: t.name, server: s.name, readOnly: Boolean(t.annotations && t.annotations.readOnlyHint), trusted: Boolean(s.trusted) });
-          defs.push({ name, description: `[${s.name}] ${t.description || t.title || t.name}`.slice(0, 1000), parameters: t.inputSchema && t.inputSchema.type ? t.inputSchema : { type: 'object', properties: {} } });
+          defs.push({ name, description: `[${s.name}] ${t.description || t.title || t.name}`.slice(0, 1000), parameters: cleanSchema(t.inputSchema) });
         }
       }
       return defs;
@@ -305,4 +353,4 @@ function createManager({ file, secrets, openExternal, confirmGlobal } = {}) {
   };
 }
 
-module.exports = { createManager, checkUrl, slug };
+module.exports = { cleanSchema, createManager, checkUrl, slug };

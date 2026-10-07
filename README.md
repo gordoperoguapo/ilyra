@@ -9,20 +9,25 @@ Keys are pasted into **Settings, AI models**, encrypted with Windows' per-user p
 ## What Ilyra can do
 
 - **Chat with Claude, ChatGPT, Gemini and Meta.** Replies stream in, with the model's thinking, the steps it took and its sources folded beside them. If a model is retired, overloaded or out of credit, Ilyra tries the next best one.
-- **Local models.** Run [Ollama](https://ollama.com), LM Studio, llama.cpp, Jan or vLLM and Ilyra finds it: open **Settings, AI models**, press Save on the Local row, and pick a model. No key, and what a local model answers never leaves your computer (unless it hands work to a cloud model; see below). The context size starts at a common 8k and can be raised for bigger machines. Local models get Ilyra's tools too (web search and running code happen on the cloud providers' side, so those stay there), and a small model is offered only the tools a message is about, with a shorter prompt to match.
+- **Local models.** Run [Ollama](https://ollama.com), LM Studio, llama.cpp, Jan or vLLM and Ilyra finds it: open **Settings, AI models**, press Save on the Local row, and pick a model. No key, and what a local model answers never leaves your computer (unless it hands work to a cloud model; see below). The context size starts at a common 8k and can be raised for bigger machines. Local models get Ilyra's tools too, including web search and running JavaScript in a locked-down sandbox, and a small model is offered only the tools a message is about, with a shorter prompt to match. Typing a message loads the model in the background, so the reply doesn't wait for it.
 - **Auto routing.** Code, research, images and everyday questions each go to the model you choose under **Settings, Who handles what**, or to a sensible default. A chat that started on a model stays with it for follow-ups.
 - **A local lead assistant.** With a local model connected, it answers everyday chat on your computer and hands code, builds, pictures, live information and long work to your cloud models, either before it starts or mid-answer by asking one. How much it keeps is up to you: automatic (by the model's size), everyday chat only, or everything except images.
 - **Web search, page reading and code.** Models search the web with their providers' own tools, can open a specific page (never private or local addresses), and run Python in the provider's sandbox.
 - **Images.** Attach or paste a picture, or capture your screen, and ask about it. ChatGPT and Gemini can make and edit images.
 - **Live previews.** A web page, app or game the model writes opens as a working preview beside the chat.
-- **Files.** Share a folder and Ilyra can read and edit files in it. Every change is shown in full and approved first, and old copies are kept for two weeks. Files that usually hold secrets are always off limits.
+- **Files.** Share a folder and Ilyra can read and edit files in it. Every change is shown in full and approved first ("Allow for this task" covers the rest of that reply), and old copies are kept for two weeks. Files that usually hold secrets are always off limits.
 - **PDFs.** Ask for a report, letter or résumé as a PDF.
 - **Memory and briefs.** A short note about you, and a page about each project or part of your life, read at the start of every chat. Each save to memory is approved unless you turn that off.
+- **Background tasks.** Hand Ilyra a job from the **Tasks** window, or ask in a chat to "work on" something. It plans, works through each step with its tools, checks its own work, can have a cloud model review the result, and tells you when it's done. Each task has its own folder in `Documents\Ilyra\tasks`, and you choose up front what it may do without asking.
+- **Skills.** Add skills (the Agent Skills format: a folder with a `SKILL.md`) from a GitHub link or a folder in the **Skills** window, read them, and turn them on. Ilyra sees each one's name and description, and reads the whole skill only when a request needs it. It never runs a skill's scripts.
+- **Library.** Your own notes and documents, searched by meaning (with an embedding model in Ollama) or by words. Put Markdown or text files in `Documents\Ilyra\library`, or add folders in **Settings, Library**. A local model gets the best-matching sections by itself; cloud models search when they need to.
+- **Artifacts.** Every page Ilyra has made, from all your chats, in one gallery.
+- **Web APIs and pages.** Save a key for a service's API with the one website it's for, and Ilyra can call that API (the key is only ever sent there). It can also open, read, click and type on web pages in a private hidden browser, asking first.
 - **Scheduled tasks.** "Remind me at 3:30", or "every weekday at 8, brief me on the news". Ilyra must be running; background mode keeps it in the tray.
 - **Connectors.** Add any remote MCP server (like Higgsfield) and your models can use its tools, with your approval.
 - **Voice.** Dictate, or switch on talk mode and speak back and forth. Speech is turned into text on your computer; replies are read aloud by OpenAI's voices with a ChatGPT key, or the Windows voice without one.
 - **Slash commands.** Type `/` for a menu: `/compact`, `/clear`, `/context`, `/usage`, `/model`, `/think`, `/web`, `/code`, `/memory`, `/remember`, `/forget`, `/copy`, `/export`, `/retry` and `/help`. They run in Ilyra and are never sent to a model.
-- **Usage.** Tokens are counted per model, per day and per chat, on your computer.
+- **Usage.** Tokens are counted per model, per day and per chat, on your computer. Ask why replies are slow and Ilyra checks its speed log: how long each step of recent replies took, with numbers.
 
 ## Run it
 
@@ -54,7 +59,8 @@ Produces `release/Ilyra Setup <version>.exe` (installer) and `release/Ilyra-<ver
 | `electron/mcp.js` | Connectors (remote MCP servers) |
 | `electron/keystore.js`, `store.js` | Encrypted keys, chats, memory, briefs, tasks and settings |
 | `electron/voice.js` | On-device speech to text |
-| `web/` | The interface: `index.html`, `styles.css`, `app.js`, the orb (`orb.js`, `miniorb.js`) and voice detection (`vad.js`) |
+| `electron/extras/` | Background tasks, skills, the library, recall, the artifacts gallery, web APIs, the hidden browser, web search and code for local models, and the speed log, wired in by `index.js` |
+| `web/` | The interface: `index.html`, `styles.css`, `app.js`, the extras' windows (`extras.js`, `extras.css`), logos (`logos.js`), the orb (`orb.js`, `miniorb.js`) and voice detection (`vad.js`) |
 | `scripts/` | Renders the app icon (`npm run icon`) |
 | `test/` | Tests, run with `npm test` |
 

@@ -622,6 +622,8 @@ function errorDetail(err) {
 // Turns SDK errors into something worth showing a person, with the provider's
 // own message after it so a failure can actually be diagnosed.
 function friendlyError(err) {
+  // Errors already written for a person are shown as they are.
+  if (err && err.forPeople) return String(err.message);
   const status = err && (err.status || err.code);
   const detail = errorDetail(err);
   const add = (text) => (detail ? `${text} (${detail})` : text);
@@ -634,6 +636,8 @@ function friendlyError(err) {
   if (isOutOfCredit(err)) return 'This account is out of credits. Add credits on the provider\'s billing page, or choose another model in Settings.';
   if (isNotFound(err)) return add('That model was not found. Pick another in Settings, AI models.');
   if (status === 429) return add('Rate limited or out of credit. Try again shortly.');
+  // A 500 that names a schema is the request being refused (a tool's definition), not a busy server.
+  if (/schema/i.test(detail)) return add("The model server refused one of Ilyra's tool definitions, often from a connector.");
   if ([500, 503, 504, 529].includes(status) || isTimeout(err)) return add('The provider is overloaded right now. Try again in a moment.');
   if (err && /fetch failed|ENOTFOUND|ECONNREFUSED|network/i.test(String(err.message))) return add('Could not reach the provider. Check your connection.');
   return detail || 'Something went wrong.';

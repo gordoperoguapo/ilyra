@@ -118,4 +118,5 @@ async function fetchPage(urlString) {
   throw new Error('Too many redirects.');
 }
 
-module.exports = { fetchPage, isPrivateAddress, htmlToText, setAllowPrivateForTests };
+// decodeEntities is also used by extras/search.js.
+module.exports = { fetchPage, isPrivateAddress, htmlToText, decodeEntities, setAllowPrivateForTests };
